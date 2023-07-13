@@ -1,0 +1,14 @@
+matplotlib
+pandas
+numpy
+tensorflow_addons
+tensorflow_datasets
+tensorflow_probability
+pyyaml
+h5py
+scikit-learn
+opencv-python
+wandb
+dppy
+scipy
+dask
