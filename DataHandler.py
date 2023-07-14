@@ -4,50 +4,56 @@
 #reordering the datasets
 import tensorflow as tf
 import numpy as np
-import tfds
+import tensorflow_datasets as tfds
+from tensorflow import keras
+import time
 
 class DataHandler():
     def __init__(self,config):
-        self.current_train_batch_num
-        self.train_batches
-        self.current_test_batch_num
-        self.test_batches
+        self.current_train_batch_num = 0
+        self.current_test_batch_num = 0
         self.config = config
         self.epoch_num = 0
 
         #download the dataset and prepare it
-        train_tfds,self.train_info = download_dataset(train=True)
+        train_tfds,self.train_info = self.download_dataset(train=True)
         self.num_classes = self.train_info.features['label'].num_classes
-        self.test_tfds,test_info = download_dataset(train=False)
+        self.test_tfds,test_info = self.download_dataset(train=False)
         self.test_tfds = self.test_tfds.batch(self.config.batch_size)
-        self.train_ds = prepare_dataset(train_tfds)
+        self.train_ds = self.prepare_dataset(train_tfds)
 
 
 
-        def download_dataset(self,train=True):
-            #download the dataset
-            print('INIT: Using ',self.config.data_percentage*100,"'%' of",self.config.data)
-            if train:
-                split = 'train[:'+str(int(self.config.data_percentage*100))+'%]'
+    def download_dataset(self,train=True):
+        #download the dataset
+        print('INIT: Using ',self.config.data_percentage*100,"'%' of",self.config.data)
+        if train:
+            split = 'train[:'+str(int(self.config.data_percentage*100))+'%]'
+        else:
+            split = 'test[:'+str(int(self.config.data_percentage*100))+'%]'  
+        return tfds.load(self.config.data,with_info=True,shuffle_files=False,as_supervised=True,split=split,data_dir=self.config.ds_path)
+
+    def prepare_dataset(self,tf_ds):
+        #convert the dataset to dataloader
+        #add loss variable to the dataset
+        print('INIT: Preparing Dataset')
+        
+        count = -1
+        #batch the dataset
+        b = 1000
+        tf_ds = tf_ds.batch(b)
+        t = time.time()
+        for img,label in tf_ds:
+            count += 1
+            img = tf.cast(img,tf.float32)
+            label = tf.one_hot(label,self.num_classes)
+            loss = tf.zeros((b,1))
+            if count==0:
+                dataloader = tf.data.Dataset.from_tensors((img,label,loss))
             else:
-                split = 'test[:'+str(int(self.config.data_percentage*100))+'%]'  
-            return tfds.load(self.config.data,with_info=True,shuffle_files=False,as_supervised=True,split=split,data_dir=self.config.ds_path)
-
-        def prepare_dataset(self,tfds):
-            #convert the dataset to dataloader
-            #add loss variable to the dataset
-            count = -1
-            for img,label in tfds:
-                count += 1
-                img = tf.cast(img,tf.float32)
-                label = tf.one_hot(label,self.num_classes)
-                loss = tf.zeros((1))
-                if count==0:
-                    dataloader = tf.data.Dataset.from_tensors((img,label,loss))
-                else:
-                    dataloader = dataloader.concatenate(tf.data.Dataset.from_tensors((img,label,loss)))
-                
-            return dataloader
+                dataloader = dataloader.concatenate(tf.data.Dataset.from_tensors((img,label,loss)))
+        print('INIT: Preparing Dataset Time: ',time.time()-t)
+        return dataloader
 
     def epoch_init(self,model,update=True,apply_method=False):
         #run on the start of each epoch

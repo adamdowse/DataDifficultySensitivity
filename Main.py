@@ -4,8 +4,8 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import Models.py as Models
-import DataHandler.py as DataHandler
+import Models
+import DataHandler
 import wandb
 from tensorflow import keras
 from wandb.keras import WandbCallback
@@ -24,7 +24,7 @@ def Main(config):
     tf.keras.backend.clear_session()
     wandb.init(project='DataDiffSensTEST',config=config.__dict__)
     dataset = DataHandler.DataHandler(config)
-    model = Models.Models(config)
+    model = Models.Models(config,dataset.train_info)
 
     #Training
     while model.epoch_num <= config.epochs and not model.early_stop():
@@ -80,35 +80,36 @@ if __name__ == "__main__":
     #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/
     #/com.docker.devenvironments.code/datasets/
         def __init__(self):
-            self.batch_size = 64
+            self.batch_size = 100
             self.epochs = 10
             self.lr = 0.01
-            self.lr_decay = 0.5
-            self.lr_decay_type = 'step'
+            self.lr_decay = 0
+            self.lr_decay_type = 'fixed'
             self.lr_decay_end = 1000
             self.optimizer = 'SGD'
+            self.loss_func = 'categorical_crossentropy'
             self.momentum = 0
             self.seed = 1
             self.save_model = False
             self.weight_decay = 0
             self.data_augmentation = False
             self.data_augmentation_type = 'random'
-            self.start_method_epoch = 0
-            self.end_method_epoch = 0
-            self.method = 'baseline'
+            self.start_method_epoch = 1
+            self.end_method_epoch = 2
+            self.method = 'Vanilla'
             self.method_param = 0
-            self.record_FIM = False
-            self.record_FIM_n_data_points = 5000
+            self.record_FIM = True
+            self.record_FIM_n_data_points = 1000
             self.record_complex_FIM = False
             self.data = 'MNIST'
             self.data_percentage = 1
             self.model_name = 'CNN'
-            self.ds_path = './data'
-            self.group = 'default'
+            self.ds_path = '/com.docker.devenvironments.code/datasets/'
+            self.group = 'test'
             self.early_stop = 10
-        
         
 
     config = config_class()
-
+    os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
+    wandb.login()
     Main(config)

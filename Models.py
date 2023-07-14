@@ -3,6 +3,7 @@
 
 import tensorflow as tf
 import wandb   
+from tensorflow import keras
 
 
 
@@ -12,62 +13,72 @@ class Models():
         self.epoch_num = 0
         self.batch_num = 0
         self.config = config
-        optimizer_init()
-        loss_func_init()
-        metrics_init()
-        model_init()
+        self.dataset_info = dataset_info
+        self.optimizer_init()
+        self.metrics_init()
+        self.model_init()
+        self.loss_func_init()
         self.lr_schedule(0,True)
         self.max_acc = 0
         
-        self.dataset_info = dataset_info
+        
 
 
-        def optimizer_init(self):
-            #this needs to define the optimizer
-            if config['optimizer'] == 'Adam':
-                self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config.lr, beta_1=0.9, beta_2=0.999, epsilon=1e-07, amsgrad=False)
-            elif config['optimizer'] == 'SGD':
-                self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config.lr)
-            elif config['optimizer'] == 'Momentum':
-                self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config.lr,momentum=self.config.momentum)
-            else:
-                print('Optimizer not recognised')    
+    def optimizer_init(self):
+        print('INIT: Optimizer: ',self.config.optimizer)
+        #this needs to define the optimizer
+        if self.config.optimizer == 'Adam':
+            self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config.lr, beta_1=0.9, beta_2=0.999, epsilon=1e-07, amsgrad=False)
+        elif self.config.optimizer == 'SGD':
+            self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config.lr)
+        elif self.config.optimizer == 'Momentum':
+            self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config.lr,momentum=self.config.momentum)
+        else:
+            print('Optimizer not recognised')    
 
-        def loss_func_init(self):
-            #this needs to define the loss function
-            if config.loss == 'CategoricalCrossentropy':
-                self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=config.label_smoothing)
-            else:
-                print('Loss not recognised')
+    def loss_func_init(self):
+        print('INIT: Loss: ',self.config.loss_func)
+        #this needs to define the loss function
+        if self.config.loss_func == 'categorical_crossentropy':
+            self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config.label_smoothing)
+        else:
+            print('Loss not recognised')
 
-        def metrics_init(self):
-            self.train_loss_metric = tf.keras.metrics.Mean(name='train_loss')
-            self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
-            self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
-            self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
+    def metrics_init(self):
+        print('INIT: Metrics')
+        self.train_loss_metric = tf.keras.metrics.Mean(name='train_loss')
+        self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
+        self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
+        self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
 
-            self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
-            self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
-            self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
-            self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
+        self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
+        self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
+        self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
+        self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
 
-        def model_init(self):
-            #this needs to define the model
-            if config.model_name == "CNN":
-                self.model = tf.keras.Sequential([
-                    tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=dataset_info.input_shape),
-                    tf.keras.layers.MaxPool2D(),
-                    tf.keras.layers.Conv2D(64,3,activation='relu'),
-                    tf.keras.layers.MaxPool2D(),
-                    tf.keras.layers.Flatten(),
-                    tf.keras.layers.Dense(128,activation='relu'),
-                    tf.keras.layers.Dense(dataset_info.num_classes,activation='softmax')
-                ])
-                self.output_is_logits = False
+    def model_init(self):
+        print('INIT: Model: ',self.config.model_name)
+        #define the model
+        #TODO add more models
+        #TODO Add model init seeds
+        if self.config.model_name == "CNN":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.dataset_info.input_shape),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu'),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu'),
+                tf.keras.layers.Dense(self.dataset_info.num_classes,activation='softmax')
+            ])
+            self.output_is_logits = False
+        
+        else:
+            print('Model not recognised')
 
-            self.model.build(input_shape=dataset_info.input_shape+(1,))
-            self.model.summary()
-            self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=['accuracy',tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
+        self.model.build(input_shape=self.dataset_info.input_shape+(1,))
+        self.model.summary()
+        self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=['accuracy',tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
 
         
     def lr_schedule(self,epoch,init=False):
@@ -75,6 +86,8 @@ class Models():
         #THIS NEEDS LOOKING AT
         if self.config.lr_decay_type == 'step':
             self.lr = self.config.lr * self.config.lr_decay**(epoch//self.config.lr_decay_end)
+        if self.config.lr_decay_type == 'fixed':
+            self.lr = self.config.lr
         elif self.config.lr_decay_type == 'cosine':
             self.lr = self.config.lr * 0.5 * (1 + tf.math.cos((epoch/self.config.epochs)*3.141592653589793))
         else:
