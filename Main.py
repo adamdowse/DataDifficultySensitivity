@@ -18,12 +18,11 @@ import os
 
 
 def Main(config):
-    #this is the main function
     print ("Main Started")
     
     #setup
     tf.keras.backend.clear_session()
-    wandb.init(project='DataDiffSens',config=config.__dict__)
+    wandb.init(project='DataDiffSensTEST',config=config.__dict__)
     dataset = DataHandler.DataHandler(config)
     model = Models.Models(config)
 
@@ -50,9 +49,7 @@ def Main(config):
         #Testing
         print("Testing")
         t = time.time()
-        while dataset.current_test_batch_num < dataset.test_batches:
-            imgs,labels = dataset.get_test_batch()
-            model.test_step(imgs,labels)
+        model.model.evaluate(dataset.test_ds)
         print("Testing Time: ",time.time()-t)
 
         #Record FIM
@@ -99,10 +96,12 @@ if __name__ == "__main__":
             self.start_method_epoch = 0
             self.end_method_epoch = 0
             self.method = 'baseline'
+            self.method_param = 0
             self.record_FIM = False
             self.record_FIM_n_data_points = 5000
             self.record_complex_FIM = False
             self.data = 'MNIST'
+            self.data_percentage = 1
             self.model_name = 'CNN'
             self.ds_path = './data'
             self.group = 'default'
