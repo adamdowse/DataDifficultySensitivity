@@ -18,8 +18,10 @@ class Models():
         self.metrics_init()
         self.model_init()
         self.loss_func_init()
+        self.model_compile()
         self.lr_schedule(0,True)
         self.max_acc = 0
+        self.early_stop_count = 0
         
         
 
@@ -63,24 +65,25 @@ class Models():
         #TODO Add model init seeds
         if self.config.model_name == "CNN":
             self.model = tf.keras.Sequential([
-                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.dataset_info.input_shape),
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.dataset_info.features['image'].shape),
                 tf.keras.layers.MaxPool2D(),
                 tf.keras.layers.Conv2D(64,3,activation='relu'),
                 tf.keras.layers.MaxPool2D(),
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(128,activation='relu'),
-                tf.keras.layers.Dense(self.dataset_info.num_classes,activation='softmax')
+                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax')
             ])
             self.output_is_logits = False
         
         else:
             print('Model not recognised')
 
-        self.model.build(input_shape=self.dataset_info.input_shape+(1,))
+        self.model.build(input_shape=self.dataset_info.features['image'].shape + (1,))
+
+    def model_compile(self):
         self.model.summary()
         self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=['accuracy',tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
 
-        
     def lr_schedule(self,epoch,init=False):
         #this needs to define the learning rate schedule
         #THIS NEEDS LOOKING AT
@@ -135,7 +138,7 @@ class Models():
         data_count = 0
         msq = 0
         while data_count < self.config.record_FIM_n_data_points:
-            img,label = dataset.get_single_train_data()
+            img,_ = dataset.get_next()
             data_count += 1
             #calc sum of squared grads for a data point and class square rooted
             z = self.Get_Z(self.model,img)
@@ -212,8 +215,20 @@ class Models():
         self.train_rec_metric(labels,preds)
 
     @tf.function
-    def get_batch_loss(self,imgs,labels):
-        preds = self.model(imgs,training=True)
+    def get_item_loss(self,img,label,training=False):
+        #expand dims
+        img = tf.expand_dims(img,0)
+        label = tf.expand_dims(label,0)
+        preds = self.model(img,training=training)
+        loss = self.loss_func(label,preds)
+        #make loss a random number between 0 and 1
+        #loss = tf.random.uniform(shape=[])
+
+        return loss
+
+    @tf.function
+    def get_batch_loss(self,imgs,labels,training=False):
+        preds = self.model(imgs,training=training)
         loss = self.loss_func(labels,preds)
         return loss
 

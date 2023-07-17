@@ -33,27 +33,29 @@ def Main(config):
         #data setup
         print("Data Setup")
         t = time.time()
-        dataset.epoch_init()
+        #need to test if we apply the method this epoch or not
+        dataset.epoch_init(model,apply_method=True)
         model.epoch_init()
         print("Data and model Setup Time: ",time.time()-t)
 
         #Training
         print("Training")
         t = time.time()
-        while dataset.current_train_batch_num < dataset.train_batches:
-            imgs,labels = dataset.get_train_batch()
+        while dataset.current_train_data_points < dataset.total_train_data_points:
+            imgs,labels = dataset.get_next()
             model.train_step(imgs,labels)
             model.batch_num += 1
-        print("Training Time: ",time.time()-t)
+        print("Epoch ",model.epoch_num, "Training Time: ",time.time()-t)
 
         #Testing
         print("Testing")
         t = time.time()
-        model.model.evaluate(dataset.test_ds)
+        model.model.evaluate(dataset.test_tfds)
         print("Testing Time: ",time.time()-t)
 
         #Record FIM
         if config.record_FIM:
+            dataset.build_dataset(0)
             model.calc_FIM(dataset)
         
         if config.record_complex_FIM:
@@ -89,6 +91,7 @@ if __name__ == "__main__":
             self.optimizer = 'SGD'
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0
+            self.label_smoothing = 0
             self.seed = 1
             self.save_model = False
             self.weight_decay = 0
@@ -96,8 +99,8 @@ if __name__ == "__main__":
             self.data_augmentation_type = 'random'
             self.start_method_epoch = 1
             self.end_method_epoch = 2
-            self.method = 'Vanilla'
-            self.method_param = 0
+            self.method = 'HighLossPercentage'
+            self.method_param = 0.5
             self.record_FIM = True
             self.record_FIM_n_data_points = 1000
             self.record_complex_FIM = False
