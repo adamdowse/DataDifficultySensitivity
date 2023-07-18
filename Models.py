@@ -5,6 +5,7 @@ import tensorflow as tf
 import wandb   
 from tensorflow import keras
 import time
+import numpy as np
 
 
 
@@ -137,8 +138,9 @@ class Models():
         t = time.time()
         data_count = 0
         msq = 0
-        while data_count < self.config.record_FIM_n_data_points and data_count < dataset.total_train_data_points:
-            img,_ = dataset.get_next()
+        lower_lim = np.min([self.config.record_FIM_n_data_points,dataset.total_train_data_points])
+        for i in range(lower_lim):
+            img,_ = dataset.__getitem__(i,training=False,return_loss=False)
             data_count += 1
             #calc sum of squared grads for a data point and class square rooted
             z = self.Get_Z(img)
@@ -186,14 +188,12 @@ class Models():
 
     @tf.function
     def get_item_loss(self,img,label,training=False):
+        #TODO may be better to not use the self loss func here
         #expand dims
         img = tf.expand_dims(img,0)
         label = tf.expand_dims(label,0)
         preds = self.model(img,training=training)
         loss = self.loss_func(label,preds)
-        #make loss a random number between 0 and 1
-        #loss = tf.random.uniform(shape=[])
-
         return loss
 
     @tf.function

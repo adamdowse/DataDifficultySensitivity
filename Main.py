@@ -41,8 +41,8 @@ def Main(config):
         #Training
         print("Training")
         t = time.time()
-        while dataset.current_train_data_points < dataset.total_train_data_points:
-            imgs,labels = dataset.get_next(training=True)
+        for i in range(dataset.num_batches):
+            imgs,labels = dataset.__getitem__(i,training=True,return_loss=False)
             model.train_step(imgs,labels)
             model.batch_num += 1
         print("Epoch ",model.epoch_num, "Training Time: ",time.time()-t)
@@ -55,18 +55,15 @@ def Main(config):
 
         #Record FIM
         if config.record_FIM:
-            dataset.update_dataset_with_method(method='Vanilla')
-            dataset.build_dataset(0,shuffle=False) #builds full dataset without batching
+            dataset.update_indexes_with_method(method='Vanilla')
             FullFIM, FullFIMVar = model.calc_FIM(dataset)
         
         if config.record_highloss_FIM:
-            dataset.update_dataset_with_method(method='HighLossPercentage')
-            dataset.build_dataset(0,shuffle=False)
+            dataset.update_indexes_with_method(method='HighLossPercentage')
             HLFIM, HLFIMVar = model.calc_FIM(dataset)
 
         if config.record_lowloss_FIM:
-            dataset.update_dataset_with_method(method='LowLossPercentage')
-            dataset.build_dataset(0,shuffle=False)
+            dataset.update_indexes_with_method(method='LowLossPercentage')
             LLFIM, LLFIMVar = model.calc_FIM(dataset)
             
         #WandB logging
