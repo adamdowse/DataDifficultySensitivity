@@ -34,7 +34,7 @@ def Main(config):
         print("Data Setup")
         t = time.time()
         #need to test if we apply the method this epoch or not
-        dataset.epoch_init(model,apply_method=True)
+        dataset.epoch_init(model,method=config.method)
         model.epoch_init()
         print("Data and model Setup Time: ",time.time()-t)
 
@@ -42,7 +42,7 @@ def Main(config):
         print("Training")
         t = time.time()
         while dataset.current_train_data_points < dataset.total_train_data_points:
-            imgs,labels = dataset.get_next()
+            imgs,labels = dataset.get_next(training=True)
             model.train_step(imgs,labels)
             model.batch_num += 1
         print("Epoch ",model.epoch_num, "Training Time: ",time.time()-t)
@@ -50,19 +50,33 @@ def Main(config):
         #Testing
         print("Testing")
         t = time.time()
-        model.model.evaluate(dataset.test_tfds)
+        model.test_results = model.model.evaluate(dataset.test_tfds)
         print("Testing Time: ",time.time()-t)
 
         #Record FIM
         if config.record_FIM:
-            dataset.build_dataset(0)
-            model.calc_FIM(dataset)
+            dataset.update_dataset_with_method(method='Vanilla')
+            dataset.build_dataset(0,shuffle=False) #builds full dataset without batching
+            FullFIM, FullFIMVar = model.calc_FIM(dataset)
         
-        if config.record_complex_FIM:
-            model.calc_complex_FIM(dataset)
+        if config.record_highloss_FIM:
+            dataset.update_dataset_with_method(method='HighLossPercentage')
+            dataset.build_dataset(0,shuffle=False)
+            HLFIM, HLFIMVar = model.calc_FIM(dataset)
+
+        if config.record_lowloss_FIM:
+            dataset.update_dataset_with_method(method='LowLossPercentage')
+            dataset.build_dataset(0,shuffle=False)
+            LLFIM, LLFIMVar = model.calc_FIM(dataset)
             
         #WandB logging
         model.log_metrics()
+        if config.record_FIM:
+            wandb.log({'FullFIM':FullFIM,'FullFIMVar':FullFIMVar},step=model.epoch_num)
+        if config.record_highloss_FIM:
+            wandb.log({'HLFIM':HLFIM,'HLFIMVar':HLFIMVar},step=model.epoch_num)
+        if config.record_lowloss_FIM:
+            wandb.log({'LLFIM':LLFIM,'LLFIMVar':LLFIMVar},step=model.epoch_num)
 
         #update counters
         model.epoch_num += 1
@@ -102,8 +116,9 @@ if __name__ == "__main__":
             self.method = 'HighLossPercentage'
             self.method_param = 0.5
             self.record_FIM = True
+            self.record_highloss_FIM = True
+            self.record_lowloss_FIM = True
             self.record_FIM_n_data_points = 1000
-            self.record_complex_FIM = False
             self.data = 'MNIST'
             self.data_percentage = 1
             self.model_name = 'CNN'

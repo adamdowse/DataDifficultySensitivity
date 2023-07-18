@@ -4,6 +4,7 @@
 import tensorflow as tf
 import wandb   
 from tensorflow import keras
+import time
 
 
 
@@ -23,9 +24,6 @@ class Models():
         self.max_acc = 0
         self.early_stop_count = 0
         
-        
-
-
     def optimizer_init(self):
         print('INIT: Optimizer: ',self.config.optimizer)
         #this needs to define the optimizer
@@ -53,10 +51,11 @@ class Models():
         self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
         self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
 
-        self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
-        self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
-        self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
-        self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
+        self.test_results = [0.0,0.0,0.0,0.0]
+        #self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
+        #self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
+        #self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
+        #self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
 
     def model_init(self):
         print('INIT: Model: ',self.config.model_name)
@@ -107,19 +106,18 @@ class Models():
         self.train_prec_metric.reset_states()
         self.train_rec_metric.reset_states()
 
-        self.test_loss_metric.reset_states()
-        self.test_acc_metric.reset_states()
-        self.test_prec_metric.reset_states()
-        self.test_rec_metric.reset_states()
-
+        #self.test_loss_metric.reset_states()
+        #self.test_acc_metric.reset_states()
+        #self.test_prec_metric.reset_states()
+        #self.test_rec_metric.reset_states()
         return
     
     def early_stop(self):
         #this needs to define the early stop
         #returns true if early stop is triggered
         #check test accuracy
-        if self.test_acc_metric.result() > self.max_acc:
-            self.max_acc = self.test_acc_metric.result()
+        if self.test_results[0] > self.max_acc:
+            self.max_acc = self.test_results[0]
             self.early_stop_count = 0
         else:
             self.early_stop_count += 1
@@ -130,70 +128,42 @@ class Models():
             return False
 
     def log_metrics(self):
-        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_loss_metric.result(),'test_acc':self.test_acc_metric.result(),'test_prec':self.test_prec_metric.result(),'test_rec':self.test_rec_metric.result(),'lr':self.lr},step=self.epoch_num)
+        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'test_prec':self.test_results[2],'test_rec':self.test_results[3],'lr':self.lr},step=self.epoch_num)
 
     def calc_FIM(self,dataset):
         #this needs to define the FIM
         #calc fim diag
+        print('FIM: Calculating FIM')
+        t = time.time()
         data_count = 0
         msq = 0
-        while data_count < self.config.record_FIM_n_data_points:
+        while data_count < self.config.record_FIM_n_data_points and data_count < dataset.total_train_data_points:
             img,_ = dataset.get_next()
             data_count += 1
             #calc sum of squared grads for a data point and class square rooted
-            z = self.Get_Z(self.model,img)
+            z = self.Get_Z(img)
             if data_count == 1:
                 mean = z
             delta = z - mean
             mean += delta / (data_count+1) #Welford_cpp from web
             msq += delta * (z - mean)
 
-        self.train_FIM = mean
-        self.train_FIM_var = msq/(data_count-1)
+        train_FIM = mean
+        train_FIM_var = msq/(data_count-1)
+        print('--> time: ',time.time()-t)
+        return train_FIM,train_FIM_var
 
-    def calc_complex_FIM(self,dataset):
-        #calc fim diag
-        data_count = 0
-        msq = 0
-        while data_count < self.config.record_FIM_n_data_points:
-            img,label = dataset.get_low_loss_single_train_data()
-            data_count += 1
-            #calc sum of squared grads for a data point and class square rooted
-            z = self.Get_Z(self.model,img)
-            if data_count == 1:
-                mean = z
-            delta = z - mean
-            mean += delta / (data_count+1) #Welford_cpp from web
-            msq += delta * (z - mean)
-
-        self.low_loss_train_FIM = mean
-        self.low_loss_train_FIM_var = msq/(data_count-1)
-
-        data_count = 0
-        msq = 0
-        while data_count < self.config.record_FIM_n_data_points:
-            img,label = dataset.get_high_loss_single_train_data()
-            data_count += 1
-            #calc sum of squared grads for a data point and class square rooted
-            z = self.Get_Z(self.model,img)
-            if data_count == 1:
-                mean = z
-            delta = z - mean
-            mean += delta / (data_count+1) #Welford_cpp from web
-            msq += delta * (z - mean)
-
-        self.high_loss_train_FIM = mean
-        self.high_loss_train_FIM_var = msq/(data_count-1)
         
     @tf.function
-    def Get_Z(model,img):
+    def Get_Z(self,img):
         #returns the z value for a given x and y
+        img = tf.expand_dims(img,0)
         with tf.GradientTape() as tape:
-            output = model(img,training=False)
+            output = self.model(img,training=False)
             #sample from the output distribution
             output = tf.math.log(output[0,tf.random.categorical(tf.math.log(output), 1)[0][0]])
 
-        grad = tape.gradient(output,model.trainable_variables) #all grads 
+        grad = tape.gradient(output,self.model.trainable_variables) #all grads 
         #select the weights
         #grads = [g for g in grads if ('Filter' in g.name) or ('MatMul' in g.name)]
         grad = [tf.reshape(g,[-1]) for g in grad] #flatten grads
@@ -232,11 +202,3 @@ class Models():
         loss = self.loss_func(labels,preds)
         return loss
 
-    @tf.function
-    def test_step(self,imgs,labels):
-        preds = self.model(imgs,training=False)
-        loss = self.loss_func(labels,preds)
-        self.test_loss_metric(loss)
-        self.test_acc_metric(labels,preds)
-        self.test_prec_metric(labels,preds)
-        self.test_rec_metric(labels,preds)
