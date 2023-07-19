@@ -4,6 +4,8 @@
 import tensorflow as tf
 import wandb   
 from tensorflow import keras
+from keras import layers
+import math
 import time
 import numpy as np
 
@@ -60,22 +62,105 @@ class Models():
         #self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
 
     def model_init(self):
+        def build_resnet(x,vars,num_classes,REG=0):
+            kaiming_normal = keras.initializers.VarianceScaling(scale=2.0, mode='fan_out', distribution='untruncated_normal')
+
+            def conv3x3(x, out_planes, stride=1, name=None):
+                x = layers.ZeroPadding2D(padding=1, name=f'{name}_pad')(x)
+                return layers.Conv2D(filters=out_planes, kernel_size=3, strides=stride, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name=name)(x)
+
+            def basic_block(x, planes, stride=1, downsample=None, name=None):
+                identity = x
+
+                out = conv3x3(x, planes, stride=stride, name=f'{name}.conv1')
+                out = layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.bn1')(out)
+                out = layers.ReLU(name=f'{name}.relu1')(out)
+
+                out = conv3x3(out, planes, name=f'{name}.conv2')
+                out = layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.bn2')(out)
+
+                if downsample is not None:
+                    for layer in downsample:
+                        identity = layer(identity)
+
+                out = layers.Add(name=f'{name}.add')([identity, out])
+                out = layers.ReLU(name=f'{name}.relu2')(out)
+
+                return out
+
+            def make_layer(x, planes, blocks, stride=1, name=None):
+                downsample = None
+                inplanes = x.shape[3]
+                if stride != 1 or inplanes != planes:
+                    downsample = [
+                        layers.Conv2D(filters=planes, kernel_size=1, strides=stride, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name=f'{name}.0.downsample.0'),
+                        layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.0.downsample.1'),
+                    ]
+
+                x = basic_block(x, planes, stride, downsample, name=f'{name}.0')
+                for i in range(1, blocks):
+                    x = basic_block(x, planes, name=f'{name}.{i}')
+
+                return x
+
+            def resnet(x, blocks_per_layer, num_classes):
+                x = layers.ZeroPadding2D(padding=3, name='conv1_pad')(x)
+                x = layers.Conv2D(filters=64, kernel_size=7, strides=2, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name='conv1')(x)
+                x = layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name='bn1')(x)
+                x = layers.ReLU(name='relu1')(x)
+                x = layers.ZeroPadding2D(padding=1, name='maxpool_pad')(x)
+                x = layers.MaxPool2D(pool_size=3, strides=2, name='maxpool')(x)
+
+                x = make_layer(x, 64, blocks_per_layer[0], name='layer1')
+                x = make_layer(x, 128, blocks_per_layer[1], stride=2, name='layer2')
+                x = make_layer(x, 256, blocks_per_layer[2], stride=2, name='layer3')
+                x = make_layer(x, 512, blocks_per_layer[3], stride=2, name='layer4')
+
+                
+
+                x = layers.GlobalAveragePooling2D(name='avgpool')(x)
+                initializer = keras.initializers.RandomUniform(-1.0 / math.sqrt(512), 1.0 / math.sqrt(512))
+                x = layers.Dense(units=num_classes, kernel_initializer=initializer, bias_initializer=initializer, name='fc')(x)
+                x = layers.Softmax(name='softmax')(x)
+                return x
+            return resnet(x, vars,num_classes)
+
+
         print('INIT: Model: ',self.config.model_name)
+        if self.config.model_init_type == 'RandNorm':
+            initialiser = tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.05, seed=self.config.model_init_seed)
+        elif self.config.model_init_type == 'RandUnif':
+            initialiser = tf.keras.initializers.RandomUniform(minval=-0.05, maxval=0.05, seed=self.config.model_init_seed)
+        elif self.config.model_init_type == 'GlorotNorm':
+            initialiser = tf.keras.initializers.GlorotNormal(seed=self.config.model_init_seed)
+        elif self.config.model_init_type == 'GlorotUnif':
+            initialiser = tf.keras.initializers.GlorotUniform(seed=self.config.model_init_seed)
+        elif self.config.model_init_type == 'HeNorm':
+            initialiser = tf.keras.initializers.HeNormal(seed=self.config.model_init_seed)
+        elif self.config.model_init_type == 'HeUnif':
+            initialiser = tf.keras.initializers.HeUniform(seed=self.config.model_init_seed)
+        else:
+            print('Model init type not recognised')
+
+        
         #define the model
-        #TODO add more models
-        #TODO Add model init seeds
         if self.config.model_name == "CNN":
             self.model = tf.keras.Sequential([
-                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.dataset_info.features['image'].shape),
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.dataset_info.features['image'].shape, kernel_initializer=initialiser),
                 tf.keras.layers.MaxPool2D(),
-                tf.keras.layers.Conv2D(64,3,activation='relu'),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
                 tf.keras.layers.MaxPool2D(),
                 tf.keras.layers.Flatten(),
-                tf.keras.layers.Dense(128,activation='relu'),
-                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax')
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax', kernel_initializer=initialiser)
             ])
             self.output_is_logits = False
-        
+        elif self.config.model_name == "ResNet18":
+            #build resnet18 model
+            inputs = keras.Input(shape=self.dataset_info.features['image'].shape)
+            outputs = build_resnet(inputs,[2,2,2,2],self.dataset_info.features['label'].num_classes,self.config.weight_decay)
+            self.model = keras.Model(inputs, outputs)
+            self.output_is_logits = False
         else:
             print('Model not recognised')
 
@@ -125,6 +210,7 @@ class Models():
             self.early_stop_count += 1
 
         if self.early_stop_count >= self.config.early_stop:
+            print('Early stop triggered')
             return True
         else:
             return False

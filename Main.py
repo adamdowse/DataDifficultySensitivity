@@ -94,8 +94,8 @@ if __name__ == "__main__":
     #/com.docker.devenvironments.code/datasets/
         def __init__(self):
             self.batch_size = 100
-            self.epochs = 20
-            self.lr = 0.01
+            self.epochs = 50
+            self.lr = 0.001
             self.lr_decay = 0
             self.lr_decay_type = 'fixed'
             self.lr_decay_end = 1000
@@ -116,9 +116,11 @@ if __name__ == "__main__":
             self.record_highloss_FIM = True
             self.record_lowloss_FIM = True
             self.record_FIM_n_data_points = 5000
-            self.data = 'MNIST'
+            self.data = 'cifar10'
             self.data_percentage = 1
-            self.model_name = 'CNN'
+            self.model_name = 'ResNet18' #CNN, ResNet18
+            self.model_init_type = 'RandNorm'
+            self.model_init_seed = 1
             self.ds_path = '/com.docker.devenvironments.code/datasets/'
             self.group = 'test'
             self.early_stop = 10
