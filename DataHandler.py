@@ -16,7 +16,7 @@ class DataHandler(tf.keras.utils.Sequence):
         #download the train dataset and prepare it
         train_tfds,self.train_info = self.download_dataset(train=True)
         self.num_classes = self.train_info.features['label'].num_classes
-        self.DS_imgs,self.DS_labels,self.DS_loss,self.train_tfds = self.prepare_dataset(train_tfds)
+        self.DS_imgs,self.DS_labels,self.DS_loss,self.train_tfds = self.prepare_dataset(train_tfds,1000)
 
         #download the test dataset and prepare it
         self.test_tfds,self.test_info = self.download_dataset(train=False)
@@ -63,7 +63,7 @@ class DataHandler(tf.keras.utils.Sequence):
         
         return tf_ds
 
-    def prepare_dataset(self,tf_ds):
+    def prepare_dataset(self,tf_ds,bs=1000):
         #convert tfds to numpy array
         #add loss to each data point
         #normalize the data
@@ -84,15 +84,15 @@ class DataHandler(tf.keras.utils.Sequence):
         #prepare tf dataset
         t = time.time()
         tf_ds = tf_ds.map(lambda img,label: (tf.cast((img-min_val)/(max_val-min_val),tf.float32),tf.one_hot(label,self.num_classes)))
+        tf_ds = tf_ds.batch(bs)
         print('--> TFDS Time: ',time.time()-t)
         return DS_imgs,DS_labels,DS_loss,tf_ds
     
     def update_dataset_loss(self,model,tf_ds):
         #update the loss for each data point
         #this is done by running the model on each data point
-        #TODO this should be done in batches
         t = time.time()
-        self.DS_loss = np.array([model.get_item_loss(img,label,training=False) for img,label in tf_ds])
+        self.DS_loss = np.array([model.get_items_loss(img,label,training=False) for img,label in tf_ds]).flatten()
         print('--> Loss Update Time: ',time.time()-t)
 
 
@@ -103,7 +103,7 @@ class DataHandler(tf.keras.utils.Sequence):
             self.update_dataset_loss(model,self.train_tfds)
 
         #applies the method to the mod_dataset
-        self.update_indexes_with_method(method=method)
+        self.update_indexes_with_method(self.config.batch_size,method=method)
     
     def update_indexes_with_method(self,bs,method='Vanilla'):
         #this will update the indexes of the dataset with the method
@@ -116,6 +116,7 @@ class DataHandler(tf.keras.utils.Sequence):
             self.indexes = np.array([i * np.ones(bs) for i in range(self.total_train_data_points//bs)]).flatten()
             np.random.shuffle(self.indexes)
             self.indexes = np.array([np.argwhere(self.indexes==i).flatten() for i in range(self.total_train_data_points//bs)]) #this is now a 2d array of indexes for each batch
+            print(self.indexes.shape)
             self.num_batches = len(self.indexes)
             print('--> Indexes Time: ',time.time()-t)
 
@@ -130,9 +131,11 @@ class DataHandler(tf.keras.utils.Sequence):
             print('--> Total Data Points: ',self.total_train_data_points)
             loss_threshold = loss_list[self.total_train_data_points]
             #create indexes for each batch by filtering the dataset
-            index = np.argwhere(self.DS_loss>loss_threshold)#TODO does this need flattening?
+            index = np.argwhere(self.DS_loss>=loss_threshold).flatten()
+            print(index.shape)
             np.random.shuffle(index)
-            self.indexes = np.array([index[i*bs:(i+1)*bs] for i in range(self.total_train_data_points//bs)])
+            self.indexes = np.array([index[i*bs:(i+1)*bs] for i in range((self.total_train_data_points//bs))])
+            print(self.indexes.shape)
             self.num_batches = len(self.indexes)
             t3 = time.time()
             print('--> Total Time: ',t3-t0) 
@@ -146,11 +149,12 @@ class DataHandler(tf.keras.utils.Sequence):
             loss_list = np.sort(loss_list)
             self.total_train_data_points = int(self.config.method_param*len(loss_list))
             print('--> Total Data Points: ',self.total_train_data_points)
-            self.loss_threshold = loss_list[self.total_train_data_points]
+            self.loss_threshold = loss_list[-self.total_train_data_points]
             #create indexes for each batch by filtering the dataset
-            index = np.argwhere(self.DS_loss<self.loss_threshold)#TODO does this need flattening?
+            index = np.argwhere(self.DS_loss<=self.loss_threshold).flatten()
             np.random.shuffle(index)
             self.indexes = np.array([index[i*bs:(i+1)*bs] for i in range(self.total_train_data_points//bs)])
+            print(self.indexes.shape)
             self.num_batches = len(self.indexes)
             t3 = time.time()
             print('--> Total Time: ',t3-t0)      

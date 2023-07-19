@@ -42,6 +42,7 @@ class Models():
         #this needs to define the loss function
         if self.config.loss_func == 'categorical_crossentropy':
             self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config.label_smoothing)
+            self.no_reduction_loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config.label_smoothing,reduction=tf.keras.losses.Reduction.NONE)
         else:
             print('Loss not recognised')
 
@@ -140,7 +141,7 @@ class Models():
         msq = 0
         lower_lim = np.min([self.config.record_FIM_n_data_points,dataset.total_train_data_points])
         for i in range(lower_lim):
-            img,_ = dataset.__getitem__(i,training=False,return_loss=False)
+            img,_ = dataset.__getitem__(i,training=False,return_loss=False)#returns a batch
             data_count += 1
             #calc sum of squared grads for a data point and class square rooted
             z = self.Get_Z(img)
@@ -159,7 +160,6 @@ class Models():
     @tf.function
     def Get_Z(self,img):
         #returns the z value for a given x and y
-        img = tf.expand_dims(img,0)
         with tf.GradientTape() as tape:
             output = self.model(img,training=False)
             #sample from the output distribution
@@ -194,6 +194,14 @@ class Models():
         label = tf.expand_dims(label,0)
         preds = self.model(img,training=training)
         loss = self.loss_func(label,preds)
+        return loss
+    
+    @tf.function
+    def get_items_loss(self,img,label,training=False):
+        #TODO may be better to not use the self loss func here
+        #expand dims
+        preds = self.model(img,training=training)
+        loss = self.no_reduction_loss_func(label,preds)
         return loss
 
     @tf.function

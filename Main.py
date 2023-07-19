@@ -55,15 +55,15 @@ def Main(config):
 
         #Record FIM
         if config.record_FIM:
-            dataset.update_indexes_with_method(method='Vanilla')
+            dataset.update_indexes_with_method(1,method='Vanilla')
             FullFIM, FullFIMVar = model.calc_FIM(dataset)
         
         if config.record_highloss_FIM:
-            dataset.update_indexes_with_method(method='HighLossPercentage')
+            dataset.update_indexes_with_method(1,method='HighLossPercentage')
             HLFIM, HLFIMVar = model.calc_FIM(dataset)
 
         if config.record_lowloss_FIM:
-            dataset.update_indexes_with_method(method='LowLossPercentage')
+            dataset.update_indexes_with_method(1,method='LowLossPercentage')
             LLFIM, LLFIMVar = model.calc_FIM(dataset)
             
         #WandB logging
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     #/com.docker.devenvironments.code/datasets/
         def __init__(self):
             self.batch_size = 100
-            self.epochs = 10
+            self.epochs = 20
             self.lr = 0.01
             self.lr_decay = 0
             self.lr_decay_type = 'fixed'
@@ -115,7 +115,7 @@ if __name__ == "__main__":
             self.record_FIM = True
             self.record_highloss_FIM = True
             self.record_lowloss_FIM = True
-            self.record_FIM_n_data_points = 1000
+            self.record_FIM_n_data_points = 5000
             self.data = 'MNIST'
             self.data_percentage = 1
             self.model_name = 'CNN'
