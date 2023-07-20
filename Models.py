@@ -166,36 +166,37 @@ class Models():
 
         elif self.config.model_name == "TFCNN":
             self.model = tf.keras.Sequential([
-                tf.keras.layers.Conv2D(32,(3,3),activation='relu',input_shape=self.dataset_info.features['image'].shape, kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(32,(3,3),activation='relu',input_shape=self.dataset_info.features['image'].shape),
                 tf.keras.layers.MaxPool2D((2,2)),
-                tf.keras.layers.Conv2D(64,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,(3,3),activation='relu'),
                 tf.keras.layers.MaxPool2D((2,2)),
-                tf.keras.layers.Conv2D(64,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,(3,3),activation='relu'),
                 tf.keras.layers.Flatten(),
-                tf.keras.layers.Dense(64,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax', kernel_initializer=initialiser)
+                tf.keras.layers.Dense(64,activation='relu'),
+                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax')
             ])
             self.output_is_logits = False
         elif self.config.model_name == "ACLCNN":
             self.model = tf.keras.Sequential([
-                tf.keras.layers.Conv2D(32,(3,3),activation='relu',input_shape=self.dataset_info.features['image'].shape, kernel_initializer=initialiser),
-                tf.keras.layers.Conv2D(32,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(32,(3,3),activation='elu',input_shape=self.dataset_info.features['image'].shape, kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(32,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Dropout(0.25),
-                tf.keras.layers.Conv2D(64,(3,3),activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.Conv2D(64,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(64,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Dropout(0.25),
-                tf.kears.layers.Conv2D(128,(3,3),activation='relu', kernel_initializer=initialiser),
-                tf.kears.layers.Conv2D(128,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(128,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(128,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Dropout(0.25),
-                tf.keras.layers.Conv2D(256,(2,2),activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.Conv2D(256,(2,2),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(256,(2,2),activation='elu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(256,(2,2),activation='elu', kernel_initializer=initialiser,padding='same'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Dropout(0.25),
                 tf.keras.layers.Flatten(),
-                tf.keras.layers.Dense(20,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(512,activation='elu', kernel_initializer=initialiser),
+                tf.keras.layers.Dropout(0.5),
                 tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax', kernel_initializer=initialiser)])
             self.output_is_logits = False
         else:
@@ -254,7 +255,7 @@ class Models():
             return False
 
     def log_metrics(self):
-        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'test_prec':self.test_results[2],'test_rec':self.test_results[3],'lr':self.lr},step=self.epoch_num)
+        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'test_prec':self.test_results[2],'test_rec':self.test_results[3],'lr':self.optimizer.learning_rate.numpy()},step=self.epoch_num)
 
     def calc_FIM(self,dataset):
         #this needs to define the FIM

@@ -93,11 +93,11 @@ if __name__ == "__main__":
     #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/
     #/com.docker.devenvironments.code/datasets/
         def __init__(self):
-            self.batch_size = 100
-            self.epochs = 50
+            self.batch_size = 32
+            self.epochs = 10
             self.lr = 0.001 #0.001 is adam preset in tf
-            self.lr_decay_type = 'exp'
-            self.config.lr_decay_param = []
+            self.lr_decay_type = 'fixed'
+            self.lr_decay_param = []
             self.optimizer = 'Adam'
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0
@@ -106,18 +106,18 @@ if __name__ == "__main__":
             self.save_model = False
             self.weight_decay = 0
             self.data_augmentation = False
-            self.data_augmentation_type = 'random'
-            self.start_method_epoch = 1
-            self.end_method_epoch = 2
-            self.method = 'HighLossPercentage'
+            self.data_augmentation_type = None
+            self.start_method_epoch = None
+            self.end_method_epoch = None
+            self.method = 'Vanilla'
             self.method_param = 0.5
-            self.record_FIM = True
-            self.record_highloss_FIM = True
-            self.record_lowloss_FIM = True
+            self.record_FIM = False
+            self.record_highloss_FIM = False
+            self.record_lowloss_FIM = False
             self.record_FIM_n_data_points = 5000
             self.data = 'cifar10'
             self.data_percentage = 1
-            self.model_name = 'ResNet18' #CNN, ResNet18
+            self.model_name = 'TFCNN' #CNN, ResNet18
             self.model_init_type = 'RandNorm'
             self.model_init_seed = 1
             self.ds_path = '/com.docker.devenvironments.code/datasets/'

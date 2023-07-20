@@ -20,9 +20,10 @@ class DataHandler(tf.keras.utils.Sequence):
 
         #download the test dataset and prepare it
         self.test_tfds,self.test_info = self.download_dataset(train=False)
-        self.test_tfds = self.test_tfds.batch(self.config.batch_size)
         self.test_tfds = self.test_tfds.map(lambda img,label: (tf.cast(img,tf.float32),tf.one_hot(label,self.num_classes)))
-        
+        self.test_tfds = self.test_tfds.map(lambda img,label: (tf.cast((img-self.min_val)/(self.max_val-self.min_val),tf.float32),label))
+        self.test_tfds = self.test_tfds.batch(self.config.batch_size)
+
         self.total_train_data_points = self.train_info.splits['train'].num_examples
         self.current_train_data_points = 0
         self.current_train_batch_num = 0
@@ -76,14 +77,15 @@ class DataHandler(tf.keras.utils.Sequence):
 
         #find max and min of img and normalize
         t = time.time()
-        max_val = np.max(DS_imgs)
-        min_val = np.min(DS_imgs)
-        DS_imgs = (DS_imgs-min_val)/(max_val-min_val)
+        self.max_val = np.max(DS_imgs)
+        self.min_val = np.min(DS_imgs)
+        DS_imgs = (DS_imgs-self.min_val)/(self.max_val-self.min_val)
         print('--> Numpy Time: ',time.time()-t)
 
         #prepare tf dataset
         t = time.time()
-        tf_ds = tf_ds.map(lambda img,label: (tf.cast((img-min_val)/(max_val-min_val),tf.float32),tf.one_hot(label,self.num_classes)))
+        tf_ds = tf_ds.map(lambda img,label: (tf.cast((img-self.min_val)/(self.max_val-self.min_val),tf.float32),tf.one_hot(label,self.num_classes)))
+        print('--> DS min: ',self.min_val,' max: ',self.max_val)
         tf_ds = tf_ds.batch(bs)
         print('--> TFDS Time: ',time.time()-t)
         return DS_imgs,DS_labels,DS_loss,tf_ds
