@@ -95,11 +95,10 @@ if __name__ == "__main__":
         def __init__(self):
             self.batch_size = 100
             self.epochs = 50
-            self.lr = 0.001
-            self.lr_decay = 0
-            self.lr_decay_type = 'fixed'
-            self.lr_decay_end = 1000
-            self.optimizer = 'SGD'
+            self.lr = 0.001 #0.001 is adam preset in tf
+            self.lr_decay_type = 'exp'
+            self.config.lr_decay_param = []
+            self.optimizer = 'Adam'
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0
             self.label_smoothing = 0

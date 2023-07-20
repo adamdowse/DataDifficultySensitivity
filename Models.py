@@ -42,6 +42,8 @@ class Models():
     def loss_func_init(self):
         print('INIT: Loss: ',self.config.loss_func)
         #this needs to define the loss function
+        #TODO add more loss functions
+
         if self.config.loss_func == 'categorical_crossentropy':
             self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config.label_smoothing)
             self.no_reduction_loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config.label_smoothing,reduction=tf.keras.losses.Reduction.NONE)
@@ -161,6 +163,41 @@ class Models():
             outputs = build_resnet(inputs,[2,2,2,2],self.dataset_info.features['label'].num_classes,self.config.weight_decay)
             self.model = keras.Model(inputs, outputs)
             self.output_is_logits = False
+
+        elif self.config.model_name == "TFCNN":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,(3,3),activation='relu',input_shape=self.dataset_info.features['image'].shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(64,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+        elif self.config.model_name == "ACLCNN":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,(3,3),activation='relu',input_shape=self.dataset_info.features['image'].shape, kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(32,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Dropout(0.25),
+                tf.keras.layers.Conv2D(64,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Dropout(0.25),
+                tf.kears.layers.Conv2D(128,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.kears.layers.Conv2D(128,(3,3),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Dropout(0.25),
+                tf.keras.layers.Conv2D(256,(2,2),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(256,(2,2),activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Dropout(0.25),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(20,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax', kernel_initializer=initialiser)])
+            self.output_is_logits = False
         else:
             print('Model not recognised')
 
@@ -172,13 +209,14 @@ class Models():
 
     def lr_schedule(self,epoch,init=False):
         #this needs to define the learning rate schedule
-        #THIS NEEDS LOOKING AT
-        if self.config.lr_decay_type == 'step':
-            self.lr = self.config.lr * self.config.lr_decay**(epoch//self.config.lr_decay_end)
-        if self.config.lr_decay_type == 'fixed':
+        if self.config.lr_decay_type == 'exp':
+            self.lr = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr,decay_steps=self.config.lr_decay_param[0],decay_rate=self.config.lr_decay_param[1],staircase=True)
+        elif self.config.lr_decay_type == 'fixed':
             self.lr = self.config.lr
         elif self.config.lr_decay_type == 'cosine':
-            self.lr = self.config.lr * 0.5 * (1 + tf.math.cos((epoch/self.config.epochs)*3.141592653589793))
+            self.lr = tf.keras.experimental.CosineDecay(self.config.lr,self.config.lr_decay_param[0])
+        elif self.config.lr_decay_type == 'cosine_restarts':
+            self.lr = tf.keras.experimental.CosineDecayRestarts(self.config.lr,self.config.lr_decay_param[0])
         else:
             print('Learning rate decay type not recognised')
     
