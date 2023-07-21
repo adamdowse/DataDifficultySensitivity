@@ -272,8 +272,8 @@ class Models():
         #this needs to define the early stop
         #returns true if early stop is triggered
         #check test accuracy
-        if self.test_results[0] > self.max_acc:
-            self.max_acc = self.test_results[0]
+        if self.test_results[1] > self.max_acc:
+            self.max_acc = self.test_results[1]
             self.early_stop_count = 0
         else:
             self.early_stop_count += 1

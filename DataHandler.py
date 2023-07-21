@@ -107,8 +107,11 @@ class DataHandler(tf.keras.utils.Sequence):
         #applies the method to the mod_dataset
         self.update_indexes_with_method(self.config.batch_size,method=method)
     
-    def update_indexes_with_method(self,bs,method='Vanilla'):
+    def update_indexes_with_method(self,bs,model,method='Vanilla',update=False):
         #this will update the indexes of the dataset with the method
+
+        if update:
+            self.update_dataset_loss(model,self.train_tfds)
 
         if method == 'Vanilla':
             print('Updating DS Indexes: Applying Vanilla Method')
@@ -160,6 +163,12 @@ class DataHandler(tf.keras.utils.Sequence):
             self.num_batches = len(self.indexes)
             t3 = time.time()
             print('--> Total Time: ',t3-t0)      
+
+        elif method == 'CL':
+            #follow the original CL method
+            print('Updating DS: Applying CL Method')
+            t0 = time.time()
+
     
 
 

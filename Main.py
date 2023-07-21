@@ -34,7 +34,13 @@ def Main(config):
         print("Data Setup")
         t = time.time()
         #need to test if we apply the method this epoch or not
-        dataset.epoch_init(model,method=config.method)
+        if config.start_method_epoch is not None and config.end_method_epoch is not None:
+            if model.epoch_num >= config.start_method_epoch and model.epoch_num < config.end_method_epoch:
+                dataset.epoch_init(model,method=config.method,update=True)
+            else:
+                dataset.epoch_init(model, method='Vanilla', update=False)
+        else:
+            dataset.epoch_init(model, method='Vanilla', update=False)
         model.epoch_init()
         print("Data and model Setup Time: ",time.time()-t)
 
@@ -55,15 +61,15 @@ def Main(config):
 
         #Record FIM
         if config.record_FIM:
-            dataset.update_indexes_with_method(1,method='Vanilla')
+            dataset.update_indexes_with_method(1,model,update=True,method='Vanilla')
             FullFIM, FullFIMVar = model.calc_FIM(dataset)
         
         if config.record_highloss_FIM:
-            dataset.update_indexes_with_method(1,method='HighLossPercentage')
+            dataset.update_indexes_with_method(1,model,method='HighLossPercentage')
             HLFIM, HLFIMVar = model.calc_FIM(dataset)
 
         if config.record_lowloss_FIM:
-            dataset.update_indexes_with_method(1,method='LowLossPercentage')
+            dataset.update_indexes_with_method(1,model,method='LowLossPercentage')
             LLFIM, LLFIMVar = model.calc_FIM(dataset)
             
         #WandB logging
