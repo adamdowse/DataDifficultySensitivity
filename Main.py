@@ -12,6 +12,7 @@ from wandb.keras import WandbCallback
 import time
 import tracemalloc
 import os
+import argparse
 
 
 
@@ -95,10 +96,14 @@ def Main(config):
 
 if __name__ == "__main__":
     #Config can be defined here
+    #argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--start_method_epoch',type=int,default=None)
+    parser.add_argument('--end_method_epoch',type=int,default=None)
     class config_class:
     #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/
     #/com.docker.devenvironments.code/datasets/
-        def __init__(self):
+        def __init__(self,args=None):
             self.batch_size = 100
             self.epochs = 200
             self.lr = 0.12 #0.001 is adam preset in tf
@@ -113,8 +118,12 @@ if __name__ == "__main__":
             self.weight_decay = 0
             self.data_augmentation = False
             self.data_augmentation_type = None
-            self.start_method_epoch = None
-            self.end_method_epoch = None
+            if args is not None or (args.start_method_epoch is not None and args.end_method_epoch is not None):
+                self.start_method_epoch = args.start_method_epoch
+                self.end_method_epoch = args.end_method_epoch
+            else:
+                self.start_method_epoch = None
+                self.end_method_epoch = None
             self.method = 'Vanilla'
             self.method_param = 0.5
             self.record_FIM = True
@@ -131,7 +140,7 @@ if __name__ == "__main__":
             self.early_stop = 20
         
 
-    config = config_class()
+    config = config_class(args=parser.parse_args())
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
     wandb.login()
     Main(config)

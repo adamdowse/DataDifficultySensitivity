@@ -285,7 +285,7 @@ class Models():
             return False
 
     def log_metrics(self):
-        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'test_prec':self.test_results[2],'test_rec':self.test_results[3],'lr':self.optimizer.learning_rate.numpy()},step=self.epoch_num)
+        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'max_test_acc':self.max_acc,'test_prec':self.test_results[2],'test_rec':self.test_results[3],'lr':self.model.optimizer.learning_rate.numpy()},step=self.epoch_num)
 
     def calc_FIM(self,dataset):
         #this needs to define the FIM
