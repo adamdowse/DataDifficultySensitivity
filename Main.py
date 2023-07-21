@@ -22,7 +22,7 @@ def Main(config):
     
     #setup
     tf.keras.backend.clear_session()
-    wandb.init(project='DataDiffSensTEST',config=config.__dict__)
+    wandb.init(project='DataDiffSens',config=config.__dict__)
     dataset = DataHandler.DataHandler(config)
     model = Models.Models(config,dataset.train_info)
 
@@ -93,12 +93,12 @@ if __name__ == "__main__":
     #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/
     #/com.docker.devenvironments.code/datasets/
         def __init__(self):
-            self.batch_size = 32
-            self.epochs = 10
-            self.lr = 0.001 #0.001 is adam preset in tf
+            self.batch_size = 100
+            self.epochs = 200
+            self.lr = 0.12 #0.001 is adam preset in tf
             self.lr_decay_type = 'fixed'
-            self.lr_decay_param = []
-            self.optimizer = 'Adam'
+            self.lr_decay_param = [1000,0.9]
+            self.optimizer = 'SGD'
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0
             self.label_smoothing = 0
@@ -111,18 +111,18 @@ if __name__ == "__main__":
             self.end_method_epoch = None
             self.method = 'Vanilla'
             self.method_param = 0.5
-            self.record_FIM = False
-            self.record_highloss_FIM = False
-            self.record_lowloss_FIM = False
+            self.record_FIM = True
+            self.record_highloss_FIM = True
+            self.record_lowloss_FIM = True
             self.record_FIM_n_data_points = 5000
             self.data = 'cifar10'
             self.data_percentage = 1
-            self.model_name = 'TFCNN' #CNN, ResNet18
-            self.model_init_type = 'RandNorm'
-            self.model_init_seed = 1
+            self.model_name = 'ResNetV1-14' #CNN, ResNet18, ACLCNN,ResNetV1-14
+            self.model_init_type = None
+            self.model_init_seed = np.random.randint(0,100000)
             self.ds_path = '/com.docker.devenvironments.code/datasets/'
-            self.group = 'test'
-            self.early_stop = 10
+            self.group = 'T1'
+            self.early_stop = 20
         
 
     config = config_class()

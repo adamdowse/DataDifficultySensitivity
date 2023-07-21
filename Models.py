@@ -163,6 +163,36 @@ class Models():
             outputs = build_resnet(inputs,[2,2,2,2],self.dataset_info.features['label'].num_classes,self.config.weight_decay)
             self.model = keras.Model(inputs, outputs)
             self.output_is_logits = False
+        
+        elif self.config.model_name == "ResNetV1-14":
+            #https://www.kaggle.com/code/filippokevin/cifar-10-resnet-14/notebook
+            inputs = keras.Input(shape=self.dataset_info.features['image'].shape)
+            conv_1 = tf.keras.layers.Conv2D(filters=32,kernel_size=(3,3),activation='relu',padding="same")(inputs)
+            conv_b1_1 = tf.keras.layers.Conv2D(filters=64,kernel_size=(3,3),activation='relu',padding="same")(conv_1)
+            conv_b1_2 = tf.keras.layers.Conv2D(filters=64,kernel_size=(3,3),activation='relu',padding="same")(conv_b1_1)
+            conv_b1_3 = tf.keras.layers.Conv2D(filters=64,kernel_size=(3,3),activation='relu',padding="same")(conv_b1_2)
+            sum_1 = tf.keras.layers.Concatenate()([conv_1,conv_b1_3])
+            avg_1 = tf.keras.layers.AveragePooling2D(pool_size=(2,2))(sum_1)
+            conv_b2_1 = tf.keras.layers.Conv2D(filters=64,kernel_size=(3,3),activation='relu',padding="same")(avg_1)
+            conv_b2_2 = tf.keras.layers.Conv2D(filters=128,kernel_size=(3,3),activation='relu',padding="same")(conv_b2_1)
+            conv_b2_3 = tf.keras.layers.Conv2D(filters=128,kernel_size=(3,3),activation='relu',padding="same")(conv_b2_2)
+            sum_2 = tf.keras.layers.Concatenate()([avg_1,conv_b2_3])
+            avg_2 = tf.keras.layers.AveragePooling2D(pool_size=(2,2))(sum_2)
+            conv_b3_1 = tf.keras.layers.Conv2D(filters=256,kernel_size=(3,3),activation='relu',padding="same")(avg_2)
+            conv_b3_2 = tf.keras.layers.Conv2D(filters=256,kernel_size=(3,3),activation='relu',padding="same")(conv_b3_1)
+            conv_b3_3 = tf.keras.layers.Conv2D(filters=256,kernel_size=(3,3),activation='relu',padding="same")(conv_b3_2)
+            sum_3 = tf.keras.layers.Concatenate()([avg_2,conv_b3_3])
+            avg_3 = tf.keras.layers.AveragePooling2D(pool_size=(2,2))(sum_3)
+            conv_b4_1 = tf.keras.layers.Conv2D(filters=512,kernel_size=(3,3),activation='relu',padding="same")(avg_3)
+            conv_b4_2 = tf.keras.layers.Conv2D(filters=512,kernel_size=(3,3),activation='relu',padding="same")(conv_b4_1)
+            conv_b4_3 = tf.keras.layers.Conv2D(filters=512,kernel_size=(3,3),activation='relu',padding="same")(conv_b4_2)
+            sum_4 = tf.keras.layers.Concatenate()([avg_3,conv_b4_3])
+            avg = tf.keras.layers.AveragePooling2D(pool_size=(2,2))(sum_4)
+            flat = tf.keras.layers.Flatten()(avg)#problema <--
+            dense1 = tf.keras.layers.Dense(16,activation='relu')(flat)
+            dense2 = tf.keras.layers.Dense(10,activation='softmax')(dense1)#maxp
+            self.model = tf.keras.models.Model(inputs=inputs,outputs=dense2)
+            self.output_is_logits = False
 
         elif self.config.model_name == "TFCNN":
             self.model = tf.keras.Sequential([
