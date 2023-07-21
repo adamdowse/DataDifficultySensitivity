@@ -208,26 +208,26 @@ class Models():
             self.output_is_logits = False
         elif self.config.model_name == "ACLCNN":
             self.model = tf.keras.Sequential([
-                tf.keras.layers.Conv2D(32,(3,3),activation='elu',input_shape=self.dataset_info.features['image'].shape, kernel_initializer=initialiser,padding='same'),
-                tf.keras.layers.Conv2D(32,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(32,(3,3),activation='elu',input_shape=self.dataset_info.features['image'].shape,padding='same'),
+                tf.keras.layers.Conv2D(32,(3,3),activation='elu', padding='same'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Dropout(0.25),
-                tf.keras.layers.Conv2D(64,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
-                tf.keras.layers.Conv2D(64,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(64,(3,3),activation='elu', padding='same'),
+                tf.keras.layers.Conv2D(64,(3,3),activation='elu', padding='same'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Dropout(0.25),
-                tf.keras.layers.Conv2D(128,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
-                tf.keras.layers.Conv2D(128,(3,3),activation='elu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(128,(3,3),activation='elu', padding='same'),
+                tf.keras.layers.Conv2D(128,(3,3),activation='elu', padding='same'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Dropout(0.25),
-                tf.keras.layers.Conv2D(256,(2,2),activation='elu', kernel_initializer=initialiser,padding='same'),
-                tf.keras.layers.Conv2D(256,(2,2),activation='elu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(256,(2,2),activation='elu', padding='same'),
+                tf.keras.layers.Conv2D(256,(2,2),activation='elu', padding='same'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Dropout(0.25),
                 tf.keras.layers.Flatten(),
-                tf.keras.layers.Dense(512,activation='elu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(512,activation='elu'),
                 tf.keras.layers.Dropout(0.5),
-                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax', kernel_initializer=initialiser)])
+                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax')])
             self.output_is_logits = False
         else:
             print('Model not recognised')

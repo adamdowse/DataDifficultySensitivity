@@ -101,11 +101,8 @@ class DataHandler(tf.keras.utils.Sequence):
     def epoch_init(self,model,update=True,method='Vanilla'):
         #run on the start of each epoch
         #updates the loss information in the original dataset
-        if update:
-            self.update_dataset_loss(model,self.train_tfds)
-
         #applies the method to the mod_dataset
-        self.update_indexes_with_method(self.config.batch_size,method=method)
+        self.update_indexes_with_method(self.config.batch_size,model,method=method,update=update)
     
     def update_indexes_with_method(self,bs,model,method='Vanilla',update=False):
         #this will update the indexes of the dataset with the method
