@@ -72,6 +72,20 @@ def Main(config):
         if config.record_lowloss_FIM:
             dataset.update_indexes_with_method(1,model,method='LowLossPercentage')
             LLFIM, LLFIMVar = model.calc_FIM(dataset)
+        
+        if config.record_staged_FIM:
+            staged_FIM = []
+            staged_FIMVar = []
+            k = 10
+            for i in range(k):
+                dataset.update_indexes_with_method(1,model,method='Staged',update=False,stage=i,num_stages=k)
+                FIM, FIMVar = model.calc_FIM(dataset)
+                staged_FIM.append(FIM)
+                staged_FIMVar.append(FIMVar)
+            
+                wandb.log({'StagedFIM_'+str(i):staged_FIM,'StagedFIMVar_'+str(i):staged_FIMVar},step=model.epoch_num)
+
+
             
         #WandB logging
         model.log_metrics()

@@ -104,7 +104,7 @@ class DataHandler(tf.keras.utils.Sequence):
         #applies the method to the mod_dataset
         self.update_indexes_with_method(self.config.batch_size,model,method=method,update=update)
     
-    def update_indexes_with_method(self,bs,model,method='Vanilla',update=False):
+    def update_indexes_with_method(self,bs,model,method='Vanilla',update=False,stage=None,num_stages=None):
         #this will update the indexes of the dataset with the method
 
         if update:
@@ -165,6 +165,26 @@ class DataHandler(tf.keras.utils.Sequence):
             #follow the original CL method
             print('Updating DS: Applying CL Method')
             t0 = time.time()
+
+        elif method == 'Staged':
+            #This is used to get a percentage of the dataset at different intervals
+            print('Updating DS: Applying Staged Method')
+            t0 = time.time()
+            loss_list = self.DS_loss
+            loss_list = np.sort(loss_list)
+            self.total_train_data_points = int(len(loss_list)/num_stages)
+            print('--> Total Data Points: ',self.total_train_data_points)
+            self.loss_threshold = [loss_list[self.total_train_data_points*stage],loss_list[self.total_train_data_points*(stage+1)]]
+            #create indexes for each batch by filtering the dataset
+            index = np.argwhere(self.DS_loss>=self.loss_threshold[0] and self.DS_loss<self.loss_threshold[1]).flatten()
+            np.random.shuffle(index)
+            self.indexes = np.array([index[i*bs:(i+1)*bs] for i in range(self.total_train_data_points//bs)])
+            print(self.indexes.shape)
+            self.num_batches = len(self.indexes)
+            print('num_batches: ',self.num_batches)
+            t3 = time.time()
+            print('--> Total Time: ',t3-t0)
+
 
     
 
