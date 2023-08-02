@@ -15,6 +15,7 @@ class Models():
     def __init__(self,config,dataset_info):
         #this needs to define hyperparams as well as the model
         self.epoch_num = 0
+        self.epoch_num_adjusted = 0
         self.batch_num = 0
         self.config = config
         self.dataset_info = dataset_info
@@ -274,18 +275,32 @@ class Models():
         #check test accuracy
         if self.test_results[1] > self.max_acc:
             self.max_acc = self.test_results[1]
-            self.early_stop_count = 0
-        else:
-            self.early_stop_count += 1
+        
+        if self.epoch_num_adjusted > self.config.early_stop_epoch:
+            if self.test_results[1] < self.max_acc:
+                self.early_stop_count += 1
+            else:
+                self.early_stop_count = 0
 
         if self.early_stop_count >= self.config.early_stop:
             print('Early stop triggered')
             return True
         else:
             return False
+        
+    def calc_loss_spectrum(self,dataset):
+        #this needs to define the loss spectrum
+        print('Loss Spectrum: Calculating Loss Spectrum')
+        t = time.time()
+        loss_spectrum = np.zeros((dataset.total_train_data_points,1))
+        for i in range(dataset.total_train_data_points):
+            img,label = dataset.__getitem__(i,training=False,return_loss=False)
+            loss_spectrum[i] = self.get_item_loss(img,label,training=False)
+        print('--> time: ',time.time()-t)
+        return loss_spectrum
 
     def log_metrics(self):
-        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'max_test_acc':self.max_acc,'test_prec':self.test_results[2],'test_rec':self.test_results[3],'lr':self.model.optimizer.learning_rate.numpy()},step=self.epoch_num)
+        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'max_test_acc':self.max_acc,'test_prec':self.test_results[2],'test_rec':self.test_results[3],'lr':self.model.optimizer.learning_rate.numpy()},step=self.epoch_num_adjusted)
 
     def calc_FIM(self,dataset):
         #this needs to define the FIM

@@ -35,13 +35,19 @@ def Main(config):
         print("Data Setup")
         t = time.time()
         #need to test if we apply the method this epoch or not
-        if config.start_method_epoch is not None and config.end_method_epoch is not None:
-            if model.epoch_num >= config.start_method_epoch and model.epoch_num < config.end_method_epoch:
-                dataset.epoch_init(model,method=config.method,update=True)
-            else:
-                dataset.epoch_init(model, method='Vanilla', update=False)
+        #method_index is [(start_epoch,method),(start_epoch,method),...]
+        if config.method_index is not None:
+            if np.where(np.array(config.method_index)[:,0] == str(model.epoch_num_adjusted))[0].size > 0:
+                method = config.method_index[np.where(np.array(config.method_index)[:,0] == str(model.epoch_num_adjusted))[0][0]][1]
+                if method == 'Vanilla':
+                    update = False
+                elif method == 'HighLossPercentage':
+                    update = True
         else:
-            dataset.epoch_init(model, method='Vanilla', update=False)
+            method = 'Vanilla'
+            update = False
+
+        dataset.epoch_init(model, method=method, update=update)
         model.epoch_init()
         print("Data and model Setup Time: ",time.time()-t)
 
@@ -74,29 +80,34 @@ def Main(config):
             LLFIM, LLFIMVar = model.calc_FIM(dataset)
         
         if config.record_staged_FIM:
-            staged_FIM = []
-            staged_FIMVar = []
-            k = 10
+            k = 8
             for i in range(k):
                 dataset.update_indexes_with_method(1,model,method='Staged',update=False,stage=i,num_stages=k)
-                FIM, FIMVar = model.calc_FIM(dataset)
-                staged_FIM.append(FIM)
-                staged_FIMVar.append(FIMVar)
+                staged_FIM, staged_FIMVar = model.calc_FIM(dataset)
             
-                wandb.log({'StagedFIM_'+str(i):staged_FIM,'StagedFIMVar_'+str(i):staged_FIMVar},step=model.epoch_num)
+                wandb.log({'StagedFIM_'+str(i):staged_FIM,'StagedFIMVar_'+str(i):staged_FIMVar},step=model.epoch_num_adjusted)
 
-
+        #Record Loss Spectrum
+        if config.record_loss_spectrum:
+            dataset.update_indexes_with_method(1,model,update=True,method='Vanilla')
+            loss_spectrum = model.calc_loss_spectrum(dataset)
+            wandb.log({'LossSpectrum':loss_spectrum},step=model.epoch_num_adjusted)
             
         #WandB logging
         model.log_metrics()
         if config.record_FIM:
-            wandb.log({'FullFIM':FullFIM,'FullFIMVar':FullFIMVar},step=model.epoch_num)
+            wandb.log({'FullFIM':FullFIM,'FullFIMVar':FullFIMVar},step=model.epoch_num_adjusted)
         if config.record_highloss_FIM:
-            wandb.log({'HLFIM':HLFIM,'HLFIMVar':HLFIMVar},step=model.epoch_num)
+            wandb.log({'HLFIM':HLFIM,'HLFIMVar':HLFIMVar},step=model.epoch_num_adjusted)
         if config.record_lowloss_FIM:
-            wandb.log({'LLFIM':LLFIM,'LLFIMVar':LLFIMVar},step=model.epoch_num)
+            wandb.log({'LLFIM':LLFIM,'LLFIMVar':LLFIMVar},step=model.epoch_num_adjusted)
 
         #update counters
+        #if the method is being applied then epoch is updated with the percentage used
+        if method == 'HighLossPercentage':
+            model.epoch_num_adjusted += config.method_param
+        else:
+            model.epoch_num_adjusted += 1
         model.epoch_num += 1
         dataset.epoch_num += 1
 
@@ -112,17 +123,17 @@ if __name__ == "__main__":
     #Config can be defined here
     #argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--start_method_epoch',type=int,default=None)
-    parser.add_argument('--end_method_epoch',type=int,default=None)
+    parser.add_argument('--method_index',type=str,default="0 Vanilla")
+    parser.add_argument('--percent',type=float,default=0.5)
     class config_class:
     #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/
     #/com.docker.devenvironments.code/datasets/
         def __init__(self,args=None):
-            self.batch_size = 100
+            self.batch_size = 128
             self.epochs = 200
-            self.lr = 0.12 #0.001 is adam preset in tf
+            self.lr = 0.01 #0.001 is adam preset in tf
             self.lr_decay_type = 'fixed'
-            self.lr_decay_param = [1000,0.9]
+            self.lr_decay_param = []
             self.optimizer = 'SGD'
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0
@@ -132,26 +143,25 @@ if __name__ == "__main__":
             self.weight_decay = 0
             self.data_augmentation = False
             self.data_augmentation_type = None
-            if args is not None or (args.start_method_epoch is not None and args.end_method_epoch is not None):
-                self.start_method_epoch = args.start_method_epoch
-                self.end_method_epoch = args.end_method_epoch
-            else:
-                self.start_method_epoch = None
-                self.end_method_epoch = None
-            self.method = 'Vanilla'
-            self.method_param = 0.5
+            args.method_index = args.method_index.split(' ')
+            self.method_index = [[int(args.method_index[i][0]),args.method_index[i+1]] for i in range(0,len(args.method_index),2)]
+            self.method_index = [(i[0],str(i[1])) for i in self.method_index]
+            self.method_param = args.percent
             self.record_FIM = True
             self.record_highloss_FIM = True
             self.record_lowloss_FIM = True
+            self.record_staged_FIM = False
             self.record_FIM_n_data_points = 5000
+            self.record_loss_spectrum = False
             self.data = 'cifar10'
             self.data_percentage = 1
-            self.model_name = 'ResNetV1-14' #CNN, ResNet18, ACLCNN,ResNetV1-14
+            self.model_name = 'ResNet18' #CNN, ResNet18, ACLCNN,ResNetV1-14
             self.model_init_type = None
             self.model_init_seed = np.random.randint(0,100000)
             self.ds_path = '/com.docker.devenvironments.code/datasets/'
-            self.group = 'T1'
+            self.group = 'T4_Staged_FIM'
             self.early_stop = 20
+            self.early_stop_epoch = 40
         
 
     config = config_class(args=parser.parse_args())
