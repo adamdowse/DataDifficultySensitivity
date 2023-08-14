@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow_datasets as tfds
 from tensorflow import keras
 import time
+import random
 
 class DataHandler(tf.keras.utils.Sequence):
     def __init__(self,config):
@@ -16,7 +17,7 @@ class DataHandler(tf.keras.utils.Sequence):
         #download the train dataset and prepare it
         train_tfds,self.train_info = self.download_dataset(train=True)
         self.num_classes = self.train_info.features['label'].num_classes
-        self.DS_imgs,self.DS_labels,self.DS_loss,self.train_tfds = self.prepare_dataset(train_tfds,1000)
+        self.DS_imgs,self.DS_labels,self.DS_loss,self.train_tfds = self.prepare_dataset(train_tfds,1000,misslabel=self.config.misslabel)
 
         #download the test dataset and prepare it
         self.test_tfds,self.test_info = self.download_dataset(train=False)
@@ -64,7 +65,7 @@ class DataHandler(tf.keras.utils.Sequence):
         
         return tf_ds
 
-    def prepare_dataset(self,tf_ds,bs=1000):
+    def prepare_dataset(self,tf_ds,bs=1000,misslabel=0):
         #convert tfds to numpy array
         #add loss to each data point
         #normalize the data
@@ -72,6 +73,22 @@ class DataHandler(tf.keras.utils.Sequence):
 
         DS_imgs = np.array([img for img,label in tf_ds]) #TODO this could be done in batches
         DS_labels = np.array([label for img,label in tf_ds])
+        if misslabel != 0 and misslabel != 1:
+            #randomly misslabel some of the data make sure not to mislable the same label twice
+            for i in range(int(len(DS_labels)*misslabel)):
+                rand_index = random.randint(0,len(DS_labels)-1)
+                rand_label = random.randint(0,self.num_classes-1)
+                while DS_labels[rand_index] == rand_label:
+                    rand_label = random.randint(0,self.num_classes-1)
+                DS_labels[rand_index] = rand_label
+        elif misslabel == 1:
+            #mislable all the data
+            for i in range(len(DS_labels)):
+                rand_label = random.randint(0,self.num_classes-1)
+                DS_labels[i] = rand_label
+
+            
+            
         DS_loss = np.zeros(len(DS_imgs))
         print('--> Convert Time: ',time.time()-t)
 

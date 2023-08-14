@@ -138,6 +138,7 @@ if __name__ == "__main__":
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0
             self.label_smoothing = 0
+            self.misslabel = 0.1
             self.seed = 1
             self.save_model = False
             self.weight_decay = 0
@@ -158,8 +159,8 @@ if __name__ == "__main__":
             self.model_name = 'ResNet18' #CNN, ResNet18, ACLCNN,ResNetV1-14
             self.model_init_type = None
             self.model_init_seed = np.random.randint(0,100000)
-            self.ds_path = '/com.docker.devenvironments.code/datasets/'
-            self.group = 'T4_Staged_FIM'
+            self.ds_path = '/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/'
+            self.group = 'T4_Staged_FIM_0.1misslabeled'
             self.early_stop = 20
             self.early_stop_epoch = 40
         
