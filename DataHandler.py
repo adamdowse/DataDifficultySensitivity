@@ -191,9 +191,9 @@ class DataHandler(tf.keras.utils.Sequence):
             loss_list = np.sort(loss_list)
             self.total_train_data_points = int(len(loss_list)/num_stages)
             print('--> Total Data Points: ',self.total_train_data_points)
-            self.loss_threshold = [loss_list[self.total_train_data_points*stage],loss_list[self.total_train_data_points*(stage+1)]]
+            self.loss_threshold = [loss_list[self.total_train_data_points*stage],loss_list[self.total_train_data_points*(stage+1)-1]]
             #create indexes for each batch by filtering the dataset
-            index = np.argwhere(self.DS_loss>=self.loss_threshold[0] and self.DS_loss<self.loss_threshold[1]).flatten()
+            index = np.argwhere((self.DS_loss>=self.loss_threshold[0]) & (self.DS_loss<self.loss_threshold[1])).flatten()
             np.random.shuffle(index)
             self.indexes = np.array([index[i*bs:(i+1)*bs] for i in range(self.total_train_data_points//bs)])
             #make sure self.indexes is the correct shape
