@@ -196,6 +196,11 @@ class DataHandler(tf.keras.utils.Sequence):
             index = np.argwhere(self.DS_loss>=self.loss_threshold[0] and self.DS_loss<self.loss_threshold[1]).flatten()
             np.random.shuffle(index)
             self.indexes = np.array([index[i*bs:(i+1)*bs] for i in range(self.total_train_data_points//bs)])
+            #make sure self.indexes is the correct shape
+            if self.indexes.ndim != 1:
+                print('reshaping indexes happening')
+                print(self.indexes.shape)
+                self.indexes = self.indexes[:,0]
             print(self.indexes.shape)
             self.num_batches = len(self.indexes)
             print('num_batches: ',self.num_batches)

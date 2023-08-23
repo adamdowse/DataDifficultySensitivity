@@ -357,6 +357,18 @@ class Models():
         self.train_rec_metric(labels,preds)
 
     @tf.function
+    def norm_train_step(self,imgs,labels):
+        with tf.GradientTape() as tape:
+            preds = self.model(imgs,training=True)
+            loss = self.no_reduction_loss_func(labels,preds) #should return the loss of all items in batch
+        grads = tape.gradient(loss,self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
+        self.train_loss_metric(loss)
+        self.train_acc_metric(labels,preds)
+        self.train_prec_metric(labels,preds)
+        self.train_rec_metric(labels,preds)
+
+    @tf.function
     def get_item_loss(self,img,label,training=False):
         #TODO may be better to not use the self loss func here
         #expand dims
