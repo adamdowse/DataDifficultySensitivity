@@ -13,7 +13,7 @@ from zipfile import ZipFile
 
 
 def download_data():
-    data_urls = ['https://www.kaggle.com/datasets/kmader/skin-cancer-mnist-ham10000/download?datasetVersionNumber=2']
+    data_urls = ['https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/DBW86T#']
     extract_path = '/tmp/HAM10000'
     for url in data_urls:
         with urlopen(url) as zipresp:
