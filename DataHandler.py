@@ -60,18 +60,44 @@ class DataHandler(tf.keras.utils.Sequence):
             split = 'train[:'+str(int(self.config.data_percentage*100))+'%]'
         else:
             split = 'test[:'+str(int(self.config.data_percentage*100))+'%]'  
-        tf_ds = tfds.load(self.config.data,with_info=True,shuffle_files=False,as_supervised=True,split=split,data_dir=self.config.ds_path)
+
+        if self.config.data == 'CIFAR10':
+            tf_ds = tfds.load(self.config.data,with_info=True,shuffle_files=False,as_supervised=True,split=split,data_dir=self.config.ds_path)
+    
+        elif self.config.data == 'HAM10000':
+            #NOT FINISHED
+            print('NEED TO ADD STUFF HERE')
+
         print('--> Download Time: ',time.time()-t)
         
-        return tf_ds
+        return tf_ds,
 
-    def prepare_dataset(self,tf_ds,bs=1000,misslabel=0):
+    def prepare_dataset(self,tf_ds,bs=1000,misslabel=0,normalize=True,tfds=True):
         #convert tfds to numpy array
         #add loss to each data point
         #normalize the data
         t = time.time()
+        if self.config.data == 'HAM10000':
+             #setting up for inception resnet v2
+            datagen=tf.keras.preprocessing.image.ImageDataGenerator(preprocessing_function=tf.keras.applications.inception_resnet_v2.preprocess_input)
+            image_size = 299
+            print("\nTrain Batches: ")
+            #CHECK DIR IS CORRECT
+            train_batches = datagen.flow_from_directory(directory=train_dir,
+                                                        target_size=(image_size,image_size),
+                                                        batch_size=batch_size,
+                                                        shuffle=True)
 
+            print("\nTest Batches: ")
+            test_batches =datagen.flow_from_directory(test_dir,
+                                                    target_size=(image_size,image_size),
+                                                    batch_size=batch_size,
+                                                    shuffle=False)
+
+        #Define Imgs
         DS_imgs = np.array([img for img,label in tf_ds]) #TODO this could be done in batches
+
+        #Define Labels
         DS_labels = np.array([label for img,label in tf_ds])
         if misslabel != 0 and misslabel != 1:
             #randomly misslabel some of the data make sure not to mislable the same label twice
@@ -87,8 +113,7 @@ class DataHandler(tf.keras.utils.Sequence):
                 rand_label = random.randint(0,self.num_classes-1)
                 DS_labels[i] = rand_label
 
-            
-            
+        #Define Loss
         DS_loss = np.zeros(len(DS_imgs))
         print('--> Convert Time: ',time.time()-t)
 

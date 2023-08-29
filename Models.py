@@ -129,6 +129,95 @@ class Models():
                 return x
             return resnet(x, vars,num_classes)
 
+        class SoftAttention(layers.Layer):
+            def __init__(self,ch,m,concat_with_x=False,aggregate=False,**kwargs):
+                self.channels=int(ch)
+                self.multiheads = m
+                self.aggregate_channels = aggregate
+                self.concat_input_with_scaled = concat_with_x
+
+                
+                super(SoftAttention,self).__init__(**kwargs)
+
+            def build(self,input_shape):
+
+                self.i_shape = input_shape
+
+                kernel_shape_conv3d = (self.channels, 3, 3) + (1, self.multiheads) # DHWC
+            
+                self.out_attention_maps_shape = input_shape[0:1]+(self.multiheads,)+input_shape[1:-1]
+                
+                if self.aggregate_channels==False:
+
+                    self.out_features_shape = input_shape[:-1]+(input_shape[-1]+(input_shape[-1]*self.multiheads),)
+                else:
+                    if self.concat_input_with_scaled:
+                        self.out_features_shape = input_shape[:-1]+(input_shape[-1]*2,)
+                    else:
+                        self.out_features_shape = input_shape
+                
+
+                self.kernel_conv3d = self.add_weight(shape=kernel_shape_conv3d,
+                                                initializer='he_uniform',
+                                                name='kernel_conv3d')
+                self.bias_conv3d = self.add_weight(shape=(self.multiheads,),
+                                            initializer='zeros',
+                                            name='bias_conv3d')
+
+                super(SoftAttention, self).build(input_shape)
+
+            def call(self, x):
+
+                exp_x = keras.backend.expand_dims(x,axis=-1)
+
+                c3d = keras.backend.conv3d(exp_x,
+                            kernel=self.kernel_conv3d,
+                            strides=(1,1,self.i_shape[-1]), padding='same', data_format='channels_last')
+                conv3d = keras.backend.bias_add(c3d,
+                                self.bias_conv3d)
+                conv3d = keras.layers.Activation('relu')(conv3d)
+
+                conv3d = keras.backend.permute_dimensions(conv3d,pattern=(0,4,1,2,3))
+
+                
+                conv3d = keras.backend.squeeze(conv3d, axis=-1)
+                conv3d = keras.backend.reshape(conv3d,shape=(-1, self.multiheads ,self.i_shape[1]*self.i_shape[2]))
+
+                softmax_alpha = keras.backend.softmax(conv3d, axis=-1) 
+                softmax_alpha = keras.layers.Reshape(target_shape=(self.multiheads, self.i_shape[1],self.i_shape[2]))(softmax_alpha)
+
+                if self.aggregate_channels==False:
+                    exp_softmax_alpha = keras.backend.expand_dims(softmax_alpha, axis=-1)       
+                    exp_softmax_alpha = keras.backend.permute_dimensions(exp_softmax_alpha,pattern=(0,2,3,1,4))
+        
+                    x_exp = keras.backend.expand_dims(x,axis=-2)
+        
+                    u = keras.layers.Multiply()([exp_softmax_alpha, x_exp])   
+        
+                    u = keras.layers.Reshape(target_shape=(self.i_shape[1],self.i_shape[2],u.shape[-1]*u.shape[-2]))(u)
+
+                else:
+                    exp_softmax_alpha = keras.backend.permute_dimensions(softmax_alpha,pattern=(0,2,3,1))
+
+                    exp_softmax_alpha = keras.backend.sum(exp_softmax_alpha,axis=-1)
+
+                    exp_softmax_alpha = keras.backend.expand_dims(exp_softmax_alpha, axis=-1)
+
+                    u = keras.layers.Multiply()([exp_softmax_alpha, x])   
+
+                if self.concat_input_with_scaled:
+                    o = keras.layers.Concatenate(axis=-1)([u,x])
+                else:
+                    o = u
+                
+                return [o, softmax_alpha]
+
+            def compute_output_shape(self, input_shape): 
+                return [self.out_features_shape, self.out_attention_maps_shape]
+
+            
+            def get_config(self):
+                return super(SoftAttention,self).get_config()
 
         print('INIT: Model: ',self.config.model_name)
         if self.config.model_init_type == 'RandNorm':
@@ -230,6 +319,30 @@ class Models():
                 tf.keras.layers.Dense(512,activation='elu'),
                 tf.keras.layers.Dropout(0.5),
                 tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax')])
+            self.output_is_logits = False
+        elif self.config.model_name == "IRv2":
+            irv2 = tf.keras.applications.InceptionResNetV2(
+                include_top=True,
+                weights="imagenet",
+                input_tensor=None,
+                input_shape=None,
+                pooling=None,
+                classifier_activation="softmax",
+            )
+
+            # Excluding the last 28 layers of the model. and using soft attention
+            conv = irv2.layers[-28].output
+            attention_layer,map2 = SoftAttention(aggregate=True,m=16,concat_with_x=False,ch=int(conv.shape[-1]),name='soft_attention')(conv)
+            attention_layer=(tf.keras.layers.MaxPooling2D(pool_size=(2, 2),padding="same")(attention_layer))
+            conv=(tf.keras.layers.MaxPooling2D(pool_size=(2, 2),padding="same")(conv))
+
+            conv = tf.keras.layers.concatenate([conv,attention_layer])
+            conv  = tf.keras.layers.Activation('relu')(conv)
+            conv = tf.keras.layers.Dropout(0.5)(conv)
+
+            output = tf.keras.layers.Flatten()(conv)
+            output = tf.keras.layers.Dense(7, activation='softmax')(output)
+            self.model = tf.keras.models.Model(inputs=irv2.input, outputs=output)
             self.output_is_logits = False
         else:
             print('Model not recognised')
