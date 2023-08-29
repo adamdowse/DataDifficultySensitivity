@@ -189,18 +189,26 @@ class DataHandler(tf.keras.utils.Sequence):
             t0 = time.time()
             loss_list = self.DS_loss
             loss_list = np.sort(loss_list)
+            print('--> Lowest loss: ',loss_list[0],' Highest loss: ',loss_list[-1])
             self.total_train_data_points = int(len(loss_list)/num_stages)
-            print('--> Total Data Points: ',self.total_train_data_points)
+            print('--> Total Data Points In Subsection: ',self.total_train_data_points)
             self.loss_threshold = [loss_list[self.total_train_data_points*stage],loss_list[self.total_train_data_points*(stage+1)-1]]
-            #create indexes for each batch by filtering the dataset
-            index = np.argwhere((self.DS_loss>=self.loss_threshold[0]) & (self.DS_loss<self.loss_threshold[1])).flatten()
+            print('--> Loss Thresholds: ',self.loss_threshold)
+            #create indexes of all the datapoints between the thresholds
+            index = np.argwhere((self.DS_loss>=self.loss_threshold[0]) & (self.DS_loss<=self.loss_threshold[1])).flatten()
+            #shuffle these indexes
             np.random.shuffle(index)
+            print("index shape",index.shape)
+            print(index)
+            #indexes in an array of arrays of size bs
             self.indexes = np.array([index[i*bs:(i+1)*bs] for i in range(self.total_train_data_points//bs)])
             #make sure self.indexes is the correct shape
-            if self.indexes.ndim != 1:
-                print('reshaping indexes happening')
-                print(self.indexes.shape)
-                self.indexes = self.indexes[:,0]
+            print(self.indexes.shape)
+            print(self.indexes)
+            #if self.indexes.ndim != 1:
+            #    print('reshaping indexes happening')
+            #    print(self.indexes.shape)
+            #    self.indexes = self.indexes[:,0]
             print(self.indexes.shape)
             self.num_batches = len(self.indexes)
             print('num_batches: ',self.num_batches)

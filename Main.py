@@ -35,10 +35,14 @@ def Main(config):
         print("Data Setup")
         t = time.time()
         #need to test if we apply the method this epoch or not
-        #method_index is [(start_epoch,method),(start_epoch,method),...]
+        #method_index is [(start_epoch,method),(start_epoch,method),...] and start_epoch is a float
         if config.method_index is not None:
+            print(config.method_index)
+            print(str(model.epoch_num_adjusted))
+            print(np.where(np.array(config.method_index)[:,0] == str(model.epoch_num_adjusted)))
             if np.where(np.array(config.method_index)[:,0] == str(model.epoch_num_adjusted))[0].size > 0:
                 method = config.method_index[np.where(np.array(config.method_index)[:,0] == str(model.epoch_num_adjusted))[0][0]][1]
+                print(method)
                 if method == 'Vanilla':
                     update = False
                 elif method == 'HighLossPercentage':
@@ -81,26 +85,27 @@ def Main(config):
         
         if config.record_staged_FIM:
             k = 8
+            dataset.update_indexes_with_method(1,model,update=True,method='Vanilla')
             for i in range(k):
                 dataset.update_indexes_with_method(1,model,method='Staged',update=False,stage=i,num_stages=k)
                 staged_FIM, staged_FIMVar = model.calc_FIM(dataset)
             
-                wandb.log({'StagedFIM_'+str(i):staged_FIM,'StagedFIMVar_'+str(i):staged_FIMVar},step=model.epoch_num_adjusted)
+                wandb.log({'StagedFIM_'+str(i):staged_FIM,'StagedFIMVar_'+str(i):staged_FIMVar},step=model.epoch_num)
 
         #Record Loss Spectrum
         if config.record_loss_spectrum:
             dataset.update_indexes_with_method(1,model,update=True,method='Vanilla')
             loss_spectrum = model.calc_loss_spectrum(dataset)
-            wandb.log({'LossSpectrum':loss_spectrum},step=model.epoch_num_adjusted)
+            wandb.log({'LossSpectrum':loss_spectrum},step=model.epoch_num)
             
         #WandB logging
         model.log_metrics()
         if config.record_FIM:
-            wandb.log({'FullFIM':FullFIM,'FullFIMVar':FullFIMVar},step=model.epoch_num_adjusted)
+            wandb.log({'FullFIM':FullFIM,'FullFIMVar':FullFIMVar},step=model.epoch_num)
         if config.record_highloss_FIM:
-            wandb.log({'HLFIM':HLFIM,'HLFIMVar':HLFIMVar},step=model.epoch_num_adjusted)
+            wandb.log({'HLFIM':HLFIM,'HLFIMVar':HLFIMVar},step=model.epoch_num)
         if config.record_lowloss_FIM:
-            wandb.log({'LLFIM':LLFIM,'LLFIMVar':LLFIMVar},step=model.epoch_num_adjusted)
+            wandb.log({'LLFIM':LLFIM,'LLFIMVar':LLFIMVar},step=model.epoch_num)
 
         #update counters
         #if the method is being applied then epoch is updated with the percentage used
@@ -129,40 +134,43 @@ if __name__ == "__main__":
     #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/
     #/com.docker.devenvironments.code/datasets/
         def __init__(self,args=None):
-            self.batch_size = 128
+            self.batch_size = 100
             self.epochs = 200
-            self.lr = 0.01 #0.001 is adam preset in tf
-            self.lr_decay_type = 'fixed'
-            self.lr_decay_param = []
+            self.lr = 0.12 #0.001 is adam preset in tf
+            self.lr_decay_type = 'exp'
+            self.lr_decay_param = [1000,0.9]
             self.optimizer = 'SGD'
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0
             self.label_smoothing = 0
-            self.misslabel = 0.1
+            self.misslabel = 0
             self.seed = 1
             self.save_model = False
             self.weight_decay = 0
             self.data_augmentation = False
             self.data_augmentation_type = None
             args.method_index = args.method_index.split(' ')
-            self.method_index = [[int(args.method_index[i][0]),args.method_index[i+1]] for i in range(0,len(args.method_index),2)]
-            self.method_index = [(i[0],str(i[1])) for i in self.method_index]
+            print(args.method_index)
+            self.method_index = [[args.method_index[i],args.method_index[i+1]] for i in range(0,len(args.method_index),2)]
+            print(self.method_index)
+            self.method_index = [(float(i[0]),str(i[1])) for i in self.method_index]
+            print(self.method_index)
             self.method_param = args.percent
-            self.record_FIM = True
-            self.record_highloss_FIM = True
-            self.record_lowloss_FIM = True
-            self.record_staged_FIM = False
+            self.record_FIM = False
+            self.record_highloss_FIM = False
+            self.record_lowloss_FIM = False
+            self.record_staged_FIM = True
             self.record_FIM_n_data_points = 5000
             self.record_loss_spectrum = False
             self.data = 'cifar10'
             self.data_percentage = 1
-            self.model_name = 'ResNet18' #CNN, ResNet18, ACLCNN,ResNetV1-14
+            self.model_name = 'ResNetV1-14' #CNN, ResNet18, ACLCNN,ResNetV1-14
             self.model_init_type = None
             self.model_init_seed = np.random.randint(0,100000)
             self.ds_path = '/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/'
-            self.group = 'T4_Staged_FIM_0.1misslabeled'
-            self.early_stop = 20
-            self.early_stop_epoch = 40
+            self.group = 'T1_HLStaged'
+            self.early_stop = 150
+            self.early_stop_epoch = 150
         
 
     config = config_class(args=parser.parse_args())

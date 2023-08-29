@@ -231,6 +231,10 @@ class Models():
                 tf.keras.layers.Dropout(0.5),
                 tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax')])
             self.output_is_logits = False
+        elif self.config.model_name == "IRv2":
+            inputs = keras.Input(shape=self.dataset_info.features['image'].shape)
+            self.model = tf.keras.applications.InceptionResNetV2(include_top=False,weights=None,input_tensor=inputs,pooling=None,classifier_activation="softmax")
+            self.output_is_logits = False
         else:
             print('Model not recognised')
 

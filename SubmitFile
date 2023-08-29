@@ -2,7 +2,7 @@ universe = docker
 docker_image = container-registry.surrey.ac.uk/shared-containers/ad00878:SHA_7c5920db
 
 executable = /usr/bin/python3
-arguments = $ENV(PWD)/Main.py
+arguments = $ENV(PWD)/Main.py --method_index $(A) --percent $(P)
 
 should_transfer_files = YES
 environment = "mount=$ENV(PWD),/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878"
@@ -21,4 +21,45 @@ request_GPUs = 1
 request_CPUs = 4
 request_memory = 16000
 
-queue 1
+P = 0.5
+
+A = '0 HighLossPercentage 2 Vanilla'
+queue 3
+
+A = '0 Vanilla 2 HighLossPercentage 4 Vanilla'
+queue 3
+
+A = '0 Vanilla 4 HighLossPercentage 6 Vanilla'
+queue 3
+
+A = '0 Vanilla 6 HighLossPercentage 8 Vanilla'
+queue 3
+
+A = '0 Vanilla 8 HighLossPercentage 10 Vanilla'
+queue 3
+
+A = '0 Vanilla 10 HighLossPercentage 12 Vanilla'
+queue 3
+
+A = '0 Vanilla 15 HighLossPercentage 17 Vanilla'
+queue 3
+
+A = '0 Vanilla 20 HighLossPercentage 22 Vanilla'
+queue 3
+
+A = '0 Vanilla 25 HighLossPercentage 27 Vanilla'
+queue 3
+
+A = '0 Vanilla 30 HighLossPercentage 32 Vanilla'
+queue 3
+
+A = '0 Vanilla 35 HighLossPercentage 37 Vanilla'
+queue 3
+
+A = '0 Vanilla 40 HighLossPercentage 42 Vanilla'
+queue 3
+
+A = '0 Vanilla 45 HighLossPercentage 47 Vanilla'
+queue 3
+
+
