@@ -7,6 +7,7 @@ import tensorflow as tf
 from io import BytesIO
 from urllib.request import urlopen
 from zipfile import ZipFile
+from sklearn import model_selection
 
 
 # Path: HAM10000Dowloader.py
@@ -22,11 +23,12 @@ def download_data():
 
 def process_data():
     #REMEMBER TO CHANGE THE PATH
-    train_dir = "data/train"
-    test_dir = "data/test"
-    aug_dir = 'data/aug_dir' #this directory is temporary and will be deleted after the augmented images are generated
+    data_path = "HAM10000/HAM"
+    train_dir = "HAM10000/train"
+    test_dir = "HAM10000/test"
+    aug_dir = 'HAM10000/aug_dir' #this directory is temporary and will be deleted after the augmented images are generated
     
-    data_pd = pd.read_csv("HAM10000_metadata.csv")
+    data_pd = pd.read_csv("HAM10000/HAM10000_metadata.csv")
 
     df_count = data_pd.groupby('lesion_id').count()
     df_count = df_count[df_count['dx'] == 1]
@@ -43,7 +45,7 @@ def process_data():
     data_pd.head()
 
     df_count = data_pd[data_pd['is_duplicate'] == 'no']
-    train, test_df = sp.model_selection.train_test_split(df_count, test_size=0.15, stratify=df_count['dx'])
+    train, test_df = model_selection.train_test_split(df_count, test_size=0.15, stratify=df_count['dx'])
 
     def identify_trainOrtest(x):
         test_data = set(test_df['image_id'])
@@ -61,9 +63,9 @@ def process_data():
     test_list = list(test_df['image_id'])
 
     print('Train DF sise: ', len(train_list))
-    train_df.head()
+    print(train_df.head())
     print('Test DF size: ', len(test_list))
-    test_df.head()
+    print(test_df.head())
 
     # Set the image_id as the index in data_pd
     data_pd.set_index('image_id', inplace=True)
@@ -78,12 +80,13 @@ def process_data():
         os.mkdir(directory1)
         os.mkdir(directory2)
 
+    print('Copying images into train and test directories')
     for image in train_list:
         file_name = image+'.jpg'
         label = data_pd.loc[image, 'dx']
 
         # path of source image 
-        source = os.path.join('HAM10000', file_name)
+        source = os.path.join('/com.docker.devenvironments.code/HAM10000/HAM', file_name)
 
         # copying the image from the source to target file
         target = os.path.join(train_dir, label, file_name)
@@ -96,7 +99,7 @@ def process_data():
         label = data_pd.loc[image, 'dx']
 
         # path of source image 
-        source = os.path.join('HAM10000', file_name)
+        source = os.path.join('/com.docker.devenvironments.code/HAM10000/HAM', file_name)
 
         # copying the image from the source to target file
         target = os.path.join(test_dir, label, file_name)
@@ -108,17 +111,18 @@ def process_data():
 
         #creating temporary directories
         # creating a base directory
+        print('Augmenting class: ', img_class)
         os.mkdir(aug_dir)
         # creating a subdirectory inside the base directory for images of the same class
         img_dir = os.path.join(aug_dir, 'img_dir')
         os.mkdir(img_dir)
 
-        img_list = os.listdir('HAM10000/train_dir/' + img_class)
+        img_list = os.listdir('HAM10000/train/' + img_class)
 
         # Copy images from the class train dir to the img_dir 
         for file_name in img_list:
             # path of source image in training directory
-            source = os.path.join('HAM10000/train_dir/' + img_class, file_name)
+            source = os.path.join('HAM10000/train/' + img_class, file_name)
 
             # creating a target directory to send images 
             target = os.path.join(img_dir, file_name)
@@ -130,11 +134,10 @@ def process_data():
         source_path = aug_dir
 
         # Augmented images will be saved to training directory
-        save_path = 'HAM10000/train_dir/' + img_class
+        save_path = 'HAM10000/train/' + img_class
 
         # Creating Image Data Generator to augment images
         datagen = tf.keras.preprocessing.image.ImageDataGenerator(
-
             rotation_range=180,
             width_shift_range=0.1,
             height_shift_range=0.1,
@@ -142,7 +145,6 @@ def process_data():
             horizontal_flip=True,
             vertical_flip=True,
             fill_mode='nearest'
-
         )
 
         batch_size = 50
@@ -150,7 +152,7 @@ def process_data():
         aug_datagen = datagen.flow_from_directory(source_path,save_to_dir=save_path,save_format='jpg',target_size=(299, 299),batch_size=batch_size)
 
         # Generate the augmented images
-        aug_images = 8000 
+        aug_images = 500
 
         num_files = len(os.listdir(img_dir))
         num_batches = int(np.ceil((aug_images - num_files) / batch_size))
@@ -160,12 +162,12 @@ def process_data():
             images, labels = next(aug_datagen)
 
         # delete temporary directory 
-        shutil.rmtree('aug_dir')
+        shutil.rmtree('HAM10000/aug_dir')
     
     
 if __name__ == "__main__":
-    download_data()
-    #process_data()
+    #download_data()
+    process_data()
 
 
 

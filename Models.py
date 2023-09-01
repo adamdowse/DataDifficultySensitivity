@@ -33,7 +33,8 @@ class Models():
         #this needs to define the optimizer
         self.lr_schedule(0,init=True)
         if self.config.optimizer == 'Adam':
-            self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config.lr, beta_1=0.9, beta_2=0.999, epsilon=1e-07, amsgrad=False)
+            #lr decay params = [epsilon] defult = [1e-7]
+            self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config.lr, beta_1=0.9, beta_2=0.999, epsilon=self.config.lr_decay_param[0], amsgrad=False)
         elif self.config.optimizer == 'SGD':
             self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config.lr)
         elif self.config.optimizer == 'Momentum':
@@ -56,10 +57,11 @@ class Models():
         print('INIT: Metrics')
         self.train_loss_metric = tf.keras.metrics.Mean(name='train_loss')
         self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
+        self.weighted_train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='weighted_train_accuracy')
         self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
         self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
 
-        self.test_results = [0.0,0.0,0.0,0.0]
+        self.test_results = [0.0,0.0,0.0,0.0,0.0]#loss,acc,weighted_acc,prec,rec
         #self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
         #self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
         #self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
@@ -351,7 +353,7 @@ class Models():
 
     def model_compile(self):
         self.model.summary()
-        self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=['accuracy',tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
+        self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=[tf.keras.metrics.Accuracy(),tf.keras.metrics.Accuracy(sample_weight=self.config.weighted_train_acc_sample_weight),tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
 
     def lr_schedule(self,epoch,init=False):
         #this needs to define the learning rate schedule
@@ -370,12 +372,10 @@ class Models():
     
     def epoch_init(self):
         #this is called at the start of each epoch
-        #lr set
-        
-
         #Reset the metrics at the start of the next epoch
         self.train_loss_metric.reset_states()
         self.train_acc_metric.reset_states()
+        self.weighted_train_acc_metric.reset_states()
         self.train_prec_metric.reset_states()
         self.train_rec_metric.reset_states()
 
@@ -416,7 +416,7 @@ class Models():
         return loss_spectrum
 
     def log_metrics(self):
-        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'max_test_acc':self.max_acc,'test_prec':self.test_results[2],'test_rec':self.test_results[3],'lr':self.model.optimizer.learning_rate.numpy(),"adjusted_epoch":self.epoch_num_adjusted},step=self.epoch_num)
+        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'weighted_train_acc':self.weighted_train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'weighted_test_acc':self.test_result[2],'max_test_acc':self.max_acc,'test_prec':self.test_results[3],'test_rec':self.test_results[4],'lr':self.model.optimizer.learning_rate.numpy(),"adjusted_epoch":self.epoch_num_adjusted},step=self.epoch_num)
 
     def calc_FIM(self,dataset):
         #this needs to define the FIM
@@ -469,6 +469,7 @@ class Models():
         self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
         self.train_loss_metric(loss)
         self.train_acc_metric(labels,preds)
+        self.weighted_train_acc_metric(labels,preds,sample_weight=self.config.weighted_train_acc_sample_weight)
         self.train_prec_metric(labels,preds)
         self.train_rec_metric(labels,preds)
 
@@ -481,6 +482,7 @@ class Models():
         self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
         self.train_loss_metric(loss)
         self.train_acc_metric(labels,preds)
+        self.weighted_train_acc_metric(labels,preds,sample_weight=self.config.weighted_train_acc_sample_weight)
         self.train_prec_metric(labels,preds)
         self.train_rec_metric(labels,preds)
 

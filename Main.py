@@ -14,10 +14,6 @@ import tracemalloc
 import os
 import argparse
 
-
-
-
-
 def Main(config):
     print ("Main Started")
     
@@ -37,16 +33,17 @@ def Main(config):
         #need to test if we apply the method this epoch or not
         #method_index is [(start_epoch,method),(start_epoch,method),...] and start_epoch is a float
         if config.method_index is not None:
-            print(config.method_index)
-            print(str(model.epoch_num_adjusted))
-            print(np.where(np.array(config.method_index)[:,0] == str(model.epoch_num_adjusted)))
+            print('Method Index',config.method_index)
+            print('Adjusted Epoch',str(model.epoch_num_adjusted))
             if np.where(np.array(config.method_index)[:,0] == str(model.epoch_num_adjusted))[0].size > 0:
                 method = config.method_index[np.where(np.array(config.method_index)[:,0] == str(model.epoch_num_adjusted))[0][0]][1]
-                print(method)
+                print('Updating Method Used to ',method)
                 if method == 'Vanilla':
                     update = False
                 elif method == 'HighLossPercentage':
                     update = True
+                else:
+                    print("ERROR:Method not recognised")
         else:
             method = 'Vanilla'
             update = False
@@ -120,10 +117,6 @@ def Main(config):
     tf.keras.backend.clear_session()
     print('Finished')
 
-
-
-
-
 if __name__ == "__main__":
     #Config can be defined here
     #argparse
@@ -134,41 +127,39 @@ if __name__ == "__main__":
     #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/
     #/com.docker.devenvironments.code/datasets/
         def __init__(self,args=None):
-            self.batch_size = 100
-            self.epochs = 200
-            self.lr = 0.12 #0.001 is adam preset in tf
-            self.lr_decay_type = 'exp'
-            self.lr_decay_param = [1000,0.9]
-            self.optimizer = 'SGD'
+            self.batch_size = 16
+            self.epochs = 150
+            self.lr = 0.01 #0.001 is adam preset in tf
+            self.lr_decay_type = 'fixed'
+            self.lr_decay_param = [] #defult adam = [eplioon = 1e-7] SGD exp= [decay steps, decay rate]
+            self.optimizer = 'Adam'
             self.loss_func = 'categorical_crossentropy'
+            self.weighted_train_acc_sample_weight = [1,1,1,1,5,1,1] #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.momentum = 0
             self.label_smoothing = 0
             self.misslabel = 0
             self.seed = 1
             self.save_model = False
             self.weight_decay = 0
-            self.data_augmentation = False
-            self.data_augmentation_type = None
+            self.data_augmentation = False #Not implemented
+            self.data_augmentation_type = None #Not implemented
             args.method_index = args.method_index.split(' ')
-            print(args.method_index)
             self.method_index = [[args.method_index[i],args.method_index[i+1]] for i in range(0,len(args.method_index),2)]
-            print(self.method_index)
             self.method_index = [(float(i[0]),str(i[1])) for i in self.method_index]
-            print(self.method_index)
             self.method_param = args.percent
             self.record_FIM = False
             self.record_highloss_FIM = False
             self.record_lowloss_FIM = False
-            self.record_staged_FIM = True
+            self.record_staged_FIM = False
             self.record_FIM_n_data_points = 5000
             self.record_loss_spectrum = False
-            self.data = 'cifar10'
-            self.data_percentage = 1
-            self.model_name = 'ResNetV1-14' #CNN, ResNet18, ACLCNN,ResNetV1-14
+            self.data = 'HAM10000' #cifar10 HAM10000
+            self.data_percentage = 1 #1 is full dataset HAM not implemented
+            self.model_name = 'ResNetV1-14' #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
             self.model_init_type = None
             self.model_init_seed = np.random.randint(0,100000)
-            self.ds_path = '/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/'
-            self.group = 'T1_HLStaged'
+            self.ds_path = '/com.docker.devenvironments.code/HAM10000' #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/
+            self.group = 'TestT5'
             self.early_stop = 150
             self.early_stop_epoch = 150
         
