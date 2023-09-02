@@ -22,6 +22,7 @@ def Main(config):
     wandb.init(project='DataDiffSens',config=config.__dict__)
     dataset = DataHandler.DataHandler(config)
     model = Models.Models(config,dataset.train_info)
+    model.config.weighted_train_acc_sample_weight = dataset.config.weighted_train_acc_sample_weight
 
     #Training
     while model.epoch_num <= config.epochs and not model.early_stop():
@@ -131,7 +132,7 @@ if __name__ == "__main__":
             self.epochs = 150
             self.lr = 0.01 #0.001 is adam preset in tf
             self.lr_decay_type = 'fixed'
-            self.lr_decay_param = [] #defult adam = [eplioon = 1e-7] SGD exp= [decay steps, decay rate]
+            self.lr_decay_param = [0.1] #defult adam = [eplioon = 1e-7] SGD exp= [decay steps, decay rate]
             self.optimizer = 'Adam'
             self.loss_func = 'categorical_crossentropy'
             self.weighted_train_acc_sample_weight = [1,1,1,1,5,1,1] #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
@@ -155,7 +156,7 @@ if __name__ == "__main__":
             self.record_loss_spectrum = False
             self.data = 'HAM10000' #cifar10 HAM10000
             self.data_percentage = 1 #1 is full dataset HAM not implemented
-            self.model_name = 'ResNetV1-14' #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
+            self.model_name = 'IRv2' #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
             self.model_init_type = None
             self.model_init_seed = np.random.randint(0,100000)
             self.ds_path = '/com.docker.devenvironments.code/HAM10000' #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/

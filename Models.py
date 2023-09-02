@@ -353,7 +353,8 @@ class Models():
 
     def model_compile(self):
         self.model.summary()
-        self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=[tf.keras.metrics.Accuracy(),tf.keras.metrics.Accuracy(sample_weight=self.config.weighted_train_acc_sample_weight),tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
+        self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=[tf.keras.metrics.Accuracy(),tf.keras.metrics.Accuracy(name='weighted_accuracy'),tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
+        
 
     def lr_schedule(self,epoch,init=False):
         #this needs to define the learning rate schedule
@@ -469,6 +470,7 @@ class Models():
         self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
         self.train_loss_metric(loss)
         self.train_acc_metric(labels,preds)
+        #ensure the weighted accuracy is calculated with the correct sample weight and convert sample weight to shape [batchsize,7]
         self.weighted_train_acc_metric(labels,preds,sample_weight=self.config.weighted_train_acc_sample_weight)
         self.train_prec_metric(labels,preds)
         self.train_rec_metric(labels,preds)

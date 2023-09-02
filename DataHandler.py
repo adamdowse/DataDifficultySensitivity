@@ -15,7 +15,7 @@ class DataHandler(tf.keras.utils.Sequence):
         self.config = config
         self.epoch_num = 0
 
-        if self.config.data == 'CIFAR10':
+        if self.config.data == 'cifar10':
             #download the train dataset and prepare it
             train_tfds,self.train_info = self.TFdownload_dataset(train=True)
             self.num_classes = self.train_info.features['label'].num_classes
@@ -27,22 +27,38 @@ class DataHandler(tf.keras.utils.Sequence):
             self.test_tfds = self.test_tfds.map(lambda img,label: (tf.cast((img-self.min_val)/(self.max_val-self.min_val),tf.float32),label))
             self.test_tfds = self.test_tfds.batch(self.config.batch_size)
 
-            self.total_train_data_points = self.train_info.splits['train'].num_examples
+            #self.total_train_data_points = self.train_info.splits['train'].num_examples
+
 
         elif self.config.data == 'HAM10000':
             #dataset should already be downlodaded
-            self.DS_imgs,self.DS_labels,self.DS_loss,self.train_tfds,self.test_tfds,self.total_train_data_points,num_test_data_points,img_shape = self.HAMprepare_dataset(self,misslabel=0)
+            self.DS_imgs,self.DS_labels,self.DS_loss,self.train_tfds,self.test_tfds,total_train_data_points,num_test_data_points,img_shape = self.HAMprepare_dataset(self,misslabel=0)
             #build an info object like the one from tfds
-            self.train_info = tfds.core.DatasetInfo.builder('HAM10000',
-                                                            description='HAM10000',
-                                                            version='1.0.0',
-                                                            features=tfds.features.FeaturesDict({
-                                                                'image':tfds.features.Image(shape=img_shape), 
-                                                                'label':tfds.features.ClassLabel(num_classes=7)}),
-                                                            splits={'train':tfds.core.SplitInfo(name='train',num_examples=self.total_train_data_points),
-                                                                    'test':tfds.core.SplitInfo(name='test',num_examples=num_test_data_points)},
-                                                            supervised_keys=('image','label')
-                                                            )
+            #self.train_info = ('features':{'image':tfds.features.Image(shape=img_shape),'label':tfds.features.ClassLabel(num_classes=7),},)
+            class MyDatasetBuilder():
+                def __init__(self):
+                    self.name="my_dataset"
+                    self.version="1.0.0"
+                    self.split_datasets={
+                        "train": None,
+                        "test": None,
+                    }
+                    self.splits={"train": self.defsplits(total_train_data_points),
+                                "test": self.defsplits(num_test_data_points)}
+                    self.features={'image':tfds.features.Image(shape=img_shape),'label':tfds.features.ClassLabel(num_classes=7),}
+                    self.config="Test Config"
+                    self.description="Test Description"
+                    self.release_notes={
+                        "1.0.0": "Initial release with numbers up to 5!",
+                    }
+                class defsplits():
+                    def __init__(self,examples):
+                        self.num_examples = examples
+
+
+            self.train_info = MyDatasetBuilder()
+            self.num_classes = self.train_info.features['label'].num_classes
+            print(self.train_info.splits['train'].num_examples)
 
         self.current_train_data_points = 0
         self.current_train_batch_num = 0
@@ -57,9 +73,9 @@ class DataHandler(tf.keras.utils.Sequence):
         img = self.DS_imgs[self.indexes[index]]
         label = self.DS_labels[self.indexes[index]]
         loss = self.DS_loss[self.indexes[index]]
-
         img = tf.cast(img,tf.float32)
-        label = tf.one_hot(label,self.num_classes)
+        if self.config.data == 'cifar10':
+            label = tf.one_hot(label,self.num_classes)
 
         if return_loss:
             return img,label,loss
@@ -78,13 +94,13 @@ class DataHandler(tf.keras.utils.Sequence):
         else:
             split = 'test[:'+str(int(self.config.data_percentage*100))+'%]'  
 
-        if self.config.data == 'CIFAR10':
-            tf_ds = tfds.load(self.config.data,with_info=True,shuffle_files=False,as_supervised=True,split=split,data_dir=self.config.ds_path)
+        if self.config.data == 'cifar10':
+            tf_ds,info = tfds.load(self.config.data,with_info=True,shuffle_files=False,as_supervised=True,split=split,data_dir=self.config.ds_path)
         else:
             print('ERROR: Dataset not found')
 
         print('--> Download Time: ',time.time()-t)
-        return tf_ds,
+        return tf_ds,info
 
     def CIFAR10prepare_dataset(self,tf_ds,bs=1000,misslabel=0,normalize=True):
         #These methods hold whole ds in memory (be aware of this)
@@ -139,11 +155,12 @@ class DataHandler(tf.keras.utils.Sequence):
         #normalize the data
         t = time.time()
 
-        ds = tf.keras.utils.image_dataset_from_directory(directory=os.path.join(self.config.ds_path,'train'),labels='inferred',label_mode='categorical',batch_size=None,shuffle=False)
+        ds = tf.keras.utils.image_dataset_from_directory(directory=os.path.join(self.config.ds_path,'reduced/train'),image_size=(299,299),labels='inferred',label_mode='categorical',batch_size=None,shuffle=False)
         ds = ds.map(lambda img,label: (tf.keras.applications.inception_resnet_v2.preprocess_input(img),label))
 
         #Define Imgs
         DS_imgs = np.array([img for img,label in ds])
+        print(DS_imgs[0].shape)
 
         #Define Labels
         DS_labels = np.array([label for img,label in ds])
@@ -167,20 +184,25 @@ class DataHandler(tf.keras.utils.Sequence):
 
         #prepare tf dataset
         t = time.time()
-        ds = ds.batch(bs)
         print('--> Num Data Points: ',len(DS_imgs))
         print('--> TFDS Time: ',time.time()-t)
 
         print('--> Test DS')
         t = time.time()
-        test_ds = tf.keras.utils.image_dataset_from_directory(directory=os.path.join(self.config.ds_path,'test'),labels='inferred',label_mode='categorical',batch_size=None,shuffle=False)
+        test_ds = tf.keras.utils.image_dataset_from_directory(directory=os.path.join(self.config.ds_path,'test'),image_size=(299,299),labels='inferred',label_mode='categorical',batch_size=16,shuffle=False)
         test_ds = test_ds.map(lambda img,label: (tf.keras.applications.inception_resnet_v2.preprocess_input(img),label))
         img_shape = test_ds.element_spec[0].shape
+        img_shape = list(img_shape)
+        img_shape.pop(0)
+        img_shape = tuple(img_shape)
         print('--> Img Shape: ',img_shape)
         num_test_data_points = sum(1 for _ in test_ds)
         print('--> Num Test Data Points: ',num_test_data_points)
         test_ds = test_ds.batch(self.config.batch_size)
         print('--> Test DS Time: ',time.time()-t)
+        self.config.weighted_train_acc_sample_weight = [[self.config.weighted_train_acc_sample_weight[i]] for i in range(len(self.config.weighted_train_acc_sample_weight))]
+        self.config.weighted_train_acc_sample_weight = np.array([self.config.weighted_train_acc_sample_weight for i in range(self.config.batch_size)])
+        print('--> Weighted Train Acc Sample Weight shape: ',self.config.weighted_train_acc_sample_weight.shape)
 
         return DS_imgs,DS_labels,DS_loss,ds,test_ds,len(DS_imgs),num_test_data_points,img_shape
 

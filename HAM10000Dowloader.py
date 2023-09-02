@@ -106,6 +106,14 @@ def process_data():
 
         shutil.copyfile(source, target)
 
+    # this is the dir for the reduced ds 
+    reduced_dir = 'HAM10000/reduced/train'
+    os.mkdir('HAM10000/reduced')
+    os.mkdir(reduced_dir)
+    for i in targetnames:
+        directory1=reduced_dir+'/'+i
+        os.mkdir(directory1)
+
     # Augmenting images and storing them in temporary directories 
     for img_class in targetnames:
 
@@ -134,7 +142,7 @@ def process_data():
         source_path = aug_dir
 
         # Augmented images will be saved to training directory
-        save_path = 'HAM10000/train/' + img_class
+        save_path = 'HAM10000/reduced/train/' + img_class
 
         # Creating Image Data Generator to augment images
         datagen = tf.keras.preprocessing.image.ImageDataGenerator(
@@ -149,13 +157,17 @@ def process_data():
 
         batch_size = 50
 
-        aug_datagen = datagen.flow_from_directory(source_path,save_to_dir=save_path,save_format='jpg',target_size=(299, 299),batch_size=batch_size)
+        aug_datagen = datagen.flow_from_directory(source_path,save_to_dir=save_path,save_format='jpg',save_prefix='aug',target_size=(299, 299),batch_size=batch_size,shuffle=True)
 
         # Generate the augmented images
-        aug_images = 500
+        aug_images = 300
 
-        num_files = len(os.listdir(img_dir))
-        num_batches = int(np.ceil((aug_images - num_files) / batch_size))
+        #force save all generated images
+        if False:
+            num_files = len(os.listdir(img_dir))
+            num_batches = int(np.ceil((aug_images - num_files) / batch_size))
+        else:
+            num_batches = int(np.ceil(aug_images / batch_size))
 
         # creating 8000 augmented images per class
         for i in range(0, num_batches):
