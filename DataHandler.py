@@ -76,6 +76,7 @@ class DataHandler(tf.keras.utils.Sequence):
         img = tf.cast(img,tf.float32)
         if self.config.data == 'cifar10':
             label = tf.one_hot(label,self.num_classes)
+            #PROBLEMMM
 
         if return_loss:
             return img,label,loss

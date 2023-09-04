@@ -12,13 +12,13 @@ import numpy as np
 
 
 class Models():
-    def __init__(self,config,dataset_info):
+    def __init__(self,config,num_classes):
         #this needs to define hyperparams as well as the model
         self.epoch_num = 0
         self.epoch_num_adjusted = 0.0
         self.batch_num = 0
         self.config = config
-        self.dataset_info = dataset_info
+        self.img_shape = config.img_size #could add a batch dimension here
         self.optimizer_init()
         self.metrics_init()
         self.model_init()
@@ -61,11 +61,11 @@ class Models():
         self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
         self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
 
-        self.test_results = [0.0,0.0,0.0,0.0,0.0]#loss,acc,weighted_acc,prec,rec
-        #self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
-        #self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
-        #self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
-        #self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
+        self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
+        self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
+        self.weighted_test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='weighted_train_accuracy')
+        self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
+        self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
 
     def model_init(self):
         def build_resnet(x,vars,num_classes,REG=0):
@@ -241,25 +241,25 @@ class Models():
         #define the model
         if self.config.model_name == "CNN":
             self.model = tf.keras.Sequential([
-                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.dataset_info.features['image'].shape, kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
                 tf.keras.layers.MaxPool2D(),
                 tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
                 tf.keras.layers.MaxPool2D(),
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax', kernel_initializer=initialiser)
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
             ])
             self.output_is_logits = False
         elif self.config.model_name == "ResNet18":
             #build resnet18 model
-            inputs = keras.Input(shape=self.dataset_info.features['image'].shape)
-            outputs = build_resnet(inputs,[2,2,2,2],self.dataset_info.features['label'].num_classes,self.config.weight_decay)
+            inputs = keras.Input(shape=self.img_shape)
+            outputs = build_resnet(inputs,[2,2,2,2],self.num_classes,self.config.weight_decay)
             self.model = keras.Model(inputs, outputs)
             self.output_is_logits = False
         
         elif self.config.model_name == "ResNetV1-14":
             #https://www.kaggle.com/code/filippokevin/cifar-10-resnet-14/notebook
-            inputs = keras.Input(shape=self.dataset_info.features['image'].shape)
+            inputs = keras.Input(shape=self.img_shape)
             conv_1 = tf.keras.layers.Conv2D(filters=32,kernel_size=(3,3),activation='relu',padding="same")(inputs)
             conv_b1_1 = tf.keras.layers.Conv2D(filters=64,kernel_size=(3,3),activation='relu',padding="same")(conv_1)
             conv_b1_2 = tf.keras.layers.Conv2D(filters=64,kernel_size=(3,3),activation='relu',padding="same")(conv_b1_1)
@@ -283,25 +283,25 @@ class Models():
             avg = tf.keras.layers.AveragePooling2D(pool_size=(2,2))(sum_4)
             flat = tf.keras.layers.Flatten()(avg)#problema <--
             dense1 = tf.keras.layers.Dense(16,activation='relu')(flat)
-            dense2 = tf.keras.layers.Dense(10,activation='softmax')(dense1)#maxp
+            dense2 = tf.keras.layers.Dense(self.num_classes,activation='softmax')(dense1)#maxp
             self.model = tf.keras.models.Model(inputs=inputs,outputs=dense2)
             self.output_is_logits = False
 
         elif self.config.model_name == "TFCNN":
             self.model = tf.keras.Sequential([
-                tf.keras.layers.Conv2D(32,(3,3),activation='relu',input_shape=self.dataset_info.features['image'].shape),
+                tf.keras.layers.Conv2D(32,(3,3),activation='relu',input_shape=self.img_shape),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Conv2D(64,(3,3),activation='relu'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Conv2D(64,(3,3),activation='relu'),
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(64,activation='relu'),
-                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax')
+                tf.keras.layers.Dense(self.num_classes,activation='softmax')
             ])
             self.output_is_logits = False
         elif self.config.model_name == "ACLCNN":
             self.model = tf.keras.Sequential([
-                tf.keras.layers.Conv2D(32,(3,3),activation='elu',input_shape=self.dataset_info.features['image'].shape,padding='same'),
+                tf.keras.layers.Conv2D(32,(3,3),activation='elu',input_shape=self.img_shape,padding='same'),
                 tf.keras.layers.Conv2D(32,(3,3),activation='elu', padding='same'),
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Dropout(0.25),
@@ -320,7 +320,7 @@ class Models():
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(512,activation='elu'),
                 tf.keras.layers.Dropout(0.5),
-                tf.keras.layers.Dense(self.dataset_info.features['label'].num_classes,activation='softmax')])
+                tf.keras.layers.Dense(self.num_classes,activation='softmax')])
             self.output_is_logits = False
         elif self.config.model_name == "IRv2":
             irv2 = tf.keras.applications.InceptionResNetV2(
@@ -343,13 +343,13 @@ class Models():
             conv = tf.keras.layers.Dropout(0.5)(conv)
 
             output = tf.keras.layers.Flatten()(conv)
-            output = tf.keras.layers.Dense(7, activation='softmax')(output)
+            output = tf.keras.layers.Dense(self.num_classes, activation='softmax')(output)
             self.model = tf.keras.models.Model(inputs=irv2.input, outputs=output)
             self.output_is_logits = False
         else:
             print('Model not recognised')
 
-        self.model.build(input_shape=self.dataset_info.features['image'].shape + (1,))
+        self.model.build(input_shape=self.img_shape + (1,))
 
     def model_compile(self):
         self.model.summary()
@@ -380,10 +380,11 @@ class Models():
         self.train_prec_metric.reset_states()
         self.train_rec_metric.reset_states()
 
-        #self.test_loss_metric.reset_states()
-        #self.test_acc_metric.reset_states()
-        #self.test_prec_metric.reset_states()
-        #self.test_rec_metric.reset_states()
+        self.test_loss_metric.reset_states()
+        self.test_acc_metric.reset_states()
+        self.weighted_train_acc_metric.reset_states()
+        self.test_prec_metric.reset_states()
+        self.test_rec_metric.reset_states()
         return
     
     def early_stop(self):
@@ -417,7 +418,20 @@ class Models():
         return loss_spectrum
 
     def log_metrics(self):
-        wandb.log({'train_loss':self.train_loss_metric.result(),'train_acc':self.train_acc_metric.result(),'weighted_train_acc':self.weighted_train_acc_metric.result(),'train_prec':self.train_prec_metric.result(),'train_rec':self.train_rec_metric.result(),'test_loss':self.test_results[0],'test_acc':self.test_results[1],'weighted_test_acc':self.test_result[2],'max_test_acc':self.max_acc,'test_prec':self.test_results[3],'test_rec':self.test_results[4],'lr':self.model.optimizer.learning_rate.numpy(),"adjusted_epoch":self.epoch_num_adjusted},step=self.epoch_num)
+        wandb.log({'train_loss':self.train_loss_metric.result(),
+                   'train_acc':self.train_acc_metric.result(),
+                   'weighted_train_acc':self.weighted_train_acc_metric.result(),
+                   'train_prec':self.train_prec_metric.result(),
+                   'train_rec':self.train_rec_metric.result(),
+                   'test_loss':self.test_loss_metric.result(),
+                   'test_acc':self.test_acc_metric.result(),
+                   'weighted_test_acc':self.weighted_test_acc_metric.result(),
+                   'max_test_acc':self.max_acc,
+                   'test_prec':self.test_prec_metric.result(),
+                   'test_rec':self.test_rec_metric.result(),
+                   'lr':self.model.optimizer.learning_rate.numpy(),
+                   "adjusted_epoch":self.epoch_num_adjusted},
+                   step=self.epoch_num)
 
     def calc_FIM(self,dataset):
         #this needs to define the FIM
@@ -428,7 +442,7 @@ class Models():
         msq = 0
         lower_lim = np.min([self.config.record_FIM_n_data_points,dataset.total_train_data_points])
         for i in range(lower_lim):
-            img,_ = dataset.__getitem__(i,training=False,return_loss=False)#returns a batch
+            img,_ = dataset.__getitem__(i)#returns a batch
             data_count += 1
             #calc sum of squared grads for a data point and class square rooted
             z = self.Get_Z(img)
@@ -471,9 +485,21 @@ class Models():
         self.train_loss_metric(loss)
         self.train_acc_metric(labels,preds)
         #ensure the weighted accuracy is calculated with the correct sample weight and convert sample weight to shape [batchsize,7]
-        self.weighted_train_acc_metric(labels,preds,sample_weight=self.config.weighted_train_acc_sample_weight)
+        self.weighted_train_acc_metric(labels,preds,sample_weight=self.config.acc_sample_weight)
         self.train_prec_metric(labels,preds)
         self.train_rec_metric(labels,preds)
+
+    @tf.function
+    def test_step(self,imgs,labels):
+        with tf.GradientTape() as tape:
+            preds = self.model(imgs,training=False)
+            loss = self.loss_func(labels,preds)
+        self.test_loss_metric(loss)
+        self.test_acc_metric(labels,preds)
+        #ensure the weighted accuracy is calculated with the correct sample weight and convert sample weight to shape [batchsize,7]
+        self.weighted_test_acc_metric(labels,preds,sample_weight=self.config.acc_sample_weight)
+        self.test_prec_metric(labels,preds)
+        self.test_rec_metric(labels,preds)
 
     @tf.function
     def norm_train_step(self,imgs,labels):
