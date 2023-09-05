@@ -28,11 +28,12 @@ def Main(config):
         config.meta_data_path,
         config.batch_size,
         config.img_size,
+        config.acc_sample_weight,
         trainsize = config.train_test_split,
         model_name = config.model_name,
         force = False)
     model = Models.Models(config,dataset.num_classes)
-    #model.config.weighted_train_acc_sample_weight = dataset.config.weighted_train_acc_sample_weight
+    model.config.acc_sample_weight = dataset.acc_sample_weight
 
     #Training
     while model.epoch_num <= config.epochs and not model.early_stop():
@@ -50,8 +51,12 @@ def Main(config):
                 method = config.method_index[np.where(np.array(config.method_index)[:,0] == str(model.epoch_num_adjusted))[0][0]][1]
                 print('Updating Method Used to ',method)
                 if method == 'Vanilla':
+                    update_type = 'All'
+                    split_type = None
                     update = False
                 elif method == 'HighLossPercentage':
+                    update_type = 'Loss'
+                    split_type = 'High'
                     update = True
                 else:
                     print("ERROR:Method not recognised")
@@ -61,7 +66,7 @@ def Main(config):
         #update the loss of all train data if needed
         if update and model.epoch_num == 0:
             dataset.update_losses(model)
-        dataset.update_mask(method=method)
+        dataset.update_mask(method=update_type,split_type=split_type,percentage=config.method_param)
         dataset.build_batches()
         model.epoch_init()
         print("Data and model Setup Time: ",time.time()-t)
@@ -69,7 +74,8 @@ def Main(config):
         #Training
         print("Training")
         t = time.time()
-        for i in range(dataset.num_batches):
+        for i in range(dataset.num_train_batches):
+            print(i)
             imgs,labels = dataset.__getitem__(i)
             model.train_step(imgs,labels)
             model.batch_num += 1

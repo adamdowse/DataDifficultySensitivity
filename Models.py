@@ -17,6 +17,7 @@ class Models():
         self.epoch_num = 0
         self.epoch_num_adjusted = 0.0
         self.batch_num = 0
+        self.num_classes = num_classes
         self.config = config
         self.img_shape = config.img_size #could add a batch dimension here
         self.optimizer_init()
@@ -391,11 +392,11 @@ class Models():
         #this needs to define the early stop
         #returns true if early stop is triggered
         #check test accuracy
-        if self.test_acc_metric.results > self.max_acc:
-            self.max_acc = self.test_acc_metric.results
+        if self.test_acc_metric.result() > self.max_acc:
+            self.max_acc = self.test_acc_metric.result()
         
         if self.epoch_num_adjusted > self.config.early_stop_epoch:
-            if self.test_acc_metric.results < self.max_acc:
+            if self.test_acc_metric.result() < self.max_acc:
                 self.early_stop_count += 1
             else:
                 self.early_stop_count = 0
