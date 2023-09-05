@@ -10,6 +10,7 @@ import os
 import pandas as pd
 from sklearn import model_selection
 import shutil
+import cv2
 import time
 
 class CustomImageGen(tf.keras.utils.Sequence):
@@ -37,7 +38,6 @@ class CustomImageGen(tf.keras.utils.Sequence):
                                                                                            self.root_dir,
                                                                                            preaugment=True,
                                                                                            preaugment_size=1000)
-        pnt()
 
     def update_losses(self,model):
         #return the losses for all images in the train set
@@ -158,180 +158,225 @@ class CustomImageGen(tf.keras.utils.Sequence):
         return self.num_batches
 
 
-    def preprocess_csv(self, DS_name, meta_data_dir,root_dir,preaugment=False,preaugment_size=1000):
+    def preprocess_csv(self, DS_name, meta_data_dir,root_dir,preaugment=True,preaugment_size=1000,force=True):
         #preaugment_size is per class
         #preproces options for individual datasets (add more as needed)
         #convert dataframe into [id, img_name, label] format
         #only do this id the files need to be generated
-        #TODO: SET SEED
-        #set seed
+
         np.random.seed(42)
+
+
         if DS_name == 'HAM10000':
-            img_size=self.img_size
-            #adapted from SoftAttention paper
-            df = pd.read_csv(meta_data_dir)
-            df_count = df.groupby('lesion_id').count()
-            df_count = df_count[df_count['dx'] == 1]
-            df_count.reset_index(inplace=True)
+            #only create new data if force is true or folder or meta does not exist
+            if force or not os.path.exists(os.path.join(root_dir,'C_'+str(preaugment_size))):
+                #adapted from SoftAttention paper
+                df = pd.read_csv(meta_data_dir)
+                df_count = df.groupby('lesion_id').count()
+                df_count = df_count[df_count['dx'] == 1]
+                df_count.reset_index(inplace=True)
 
-            def duplicates(x):
-                unique = set(df_count['lesion_id'])
-                if x in unique:
-                    return 'no' 
-                else:
-                    return 'duplicates'
-            
-            df['is_duplicate'] = df['lesion_id'].apply(duplicates)
-            df_count = df[df['is_duplicate'] == 'no']
-            train, test_df = model_selection.train_test_split(df_count, test_size=1-self.trainsize, stratify=df_count['dx'])
-
-            def identify_trainOrtest(x):
-                test_data = set(test_df['image_id'])
-                if str(x) in test_data:
-                    return 'test'
-                else:
-                    return 'train'
-
-            #creating df for train and test
-            df['train_test_split'] = df['image_id'].apply(identify_trainOrtest)
-            train_df = df[df['train_test_split'] == 'train']
-            test_df = df[df['train_test_split'] == 'test']
-
-            # Image id of train and test images
-            train_list = list(train_df['image_id'])
-            test_list = list(test_df['image_id'])
-
-            print('Train DF sise: ', len(train_list))
-            print(train_df.head())
-            print('Test DF size: ', len(test_list))
-            print(test_df.head())
-
-            #calculate number of images in each class
-            classes = ['akiec', 'bcc', 'bkl', 'df', 'mel', 'nv', 'vasc']
-            self.num_classes = len(classes)
-            self.class_names = classes
-            train_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
-            train_df.set_index('image_id', inplace=True)
-            for img in train_list:
-                label = train_df.loc[img, 'dx']
-                train_class_count[label] += 1
-            print('Original Train Class count: ', train_class_count)
-
-            test_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
-            test_df.set_index('image_id', inplace=True)
-            for img in test_list:
-                label = test_df.loc[img, 'dx']
-                test_class_count[label] += 1
-            
-            print('Original Test Class count: ', test_class_count)
-
-            # Set the image_id as the index in data_pd
-            df.set_index('image_id', inplace=True)
-
-            #if preaugment is true then augment and save images to directory and update df with new files
-            if preaugment:
-                print('Preaugmenting images')
-                remaining_class_count = train_class_count.copy()
-                for i in classes:
-                    remaining_class_count[i] = preaugment_size - train_class_count[i]
-                print('Remaining Class Count To Add: ', remaining_class_count)
-
-                #make temp folder for aug images
-                os.mkdir(os.path.join(root_dir,'temp_dir'))
-                for i in classes:
-                    os.mkdir(os.path.join(root_dir,'temp_dir',i))
+                def duplicates(x):
+                    unique = set(df_count['lesion_id'])
+                    if x in unique:
+                        return 'no' 
+                    else:
+                        return 'duplicates'
                 
-                os.mkdir(os.path.join(root_dir,'aug_dir'))
-                for i in classes:
-                    os.mkdir(os.path.join(root_dir,'aug_dir',i))
+                df['is_duplicate'] = df['lesion_id'].apply(duplicates)
+                df_count = df[df['is_duplicate'] == 'no']
+                train, test_df = model_selection.train_test_split(df_count, test_size=1-self.trainsize, stratify=df_count['dx'])
 
-                #create data generator
-                data_aug_gen = tf.keras.preprocessing.image.ImageDataGenerator(
-                    rotation_range=180,
-                    width_shift_range=0.1,
-                    height_shift_range=0.1,
-                    zoom_range=0.1,
-                    horizontal_flip=True,
-                    vertical_flip=True,
-                    fill_mode='nearest'
-                )
-                bs = 50
+                def identify_trainOrtest(x):
+                    test_data = set(test_df['image_id'])
+                    if str(x) in test_data:
+                        return 'test'
+                    else:
+                        return 'train'
 
-                for class_name in classes:
-                    #get list of images in class
-                    class_df = train_df[train_df['dx'] == class_name]
-                    class_list = list(class_df.index)
-                    for img in class_list:
-                        file_name = img+'.jpg'
-                        label = df.loc[img, 'dx']
-                        img_path = os.path.join(root_dir,'data',file_name)
-                        target_path = os.path.join(root_dir,'temp_dir',class_name,file_name)
-                        shutil.copy(img_path,target_path)
-                        remaining_class_count[label] -= 1
-                    
-                    #create class seperated data generators
-                    source_path = os.path.join(root_dir,'temp_dir')
-                    save_path = os.path.join(root_dir,'aug_dir',class_name)
-                    #TODO THIS IS NOT WORKING CORRECTLY Class name is not being used
-                    aug_datagen = data_aug_gen.flow_from_directory(source_path,save_to_dir=save_path,save_format='jpg',save_prefix='aug',target_size=img_size,batch_size=bs,shuffle=True)
-                    
-                    #add agumented images to folder to make up a specified number
-                    num_batches = int(np.ceil((remaining_class_count[class_name]) / bs))
-                    for i in range(0,num_batches):
-                        imgs,labels = next(aug_datagen)
-                    
-                #take all images from temp_dir and move to data folder
-                if os.path.exists(os.path.join(root_dir,'C_'+preaugment_size)):
-                    shutil.rmtree(os.path.join(root_dir,'C_'+preaugment_size))
-                os.mkdir(os.path.join(root_dir,'C_'+preaugment_size))
+                #creating df for train and test
+                df['train_test_split'] = df['image_id'].apply(identify_trainOrtest)
+                train_df = df[df['train_test_split'] == 'train'].copy()
+                test_df = df[df['train_test_split'] == 'test'].copy()
 
-                #transfer all images from temp_dir to data folder
-                for i in classes:
-                    temp_dir = os.path.join(root_dir,'temp_dir',i)
-                    for img in os.listdir(temp_dir):
-                        shutil.move(os.path.join(temp_dir,img),os.path.join(root_dir,'C_'+preaugment_size,img))
-                #delete temp_dir
-                shutil.rmtree(os.path.join(root_dir,'temp_dir'))
-                #move all images from aug_dir to data folder
-                for i in classes:
-                    aug_dir = os.path.join(root_dir,'aug_dir',i)
-                    for img in os.listdir(aug_dir):
-                        shutil.move(os.path.join(aug_dir,img),os.path.join(root_dir,'C_'+preaugment_size,img))
-                #delete aug_dir
-                shutil.rmtree(os.path.join(root_dir,'aug_dir'))
+                # Image id of train and test images
+                train_list = list(train_df['image_id'])
+                test_list = list(test_df['image_id'])
 
-                #We now have a folder called 'C_1000' with 1000 images per class all in one folder
-                #update the train_df with the new images
-                #get list of images
-                train_list = os.listdir(os.path.join(root_dir,'C_'+preaugment_size))
-                #if the image is not in the train_df then add it to the train_df
-                for img in train_list:
-                    if img not in train_df.index:
-                        #copy row from index - aug
-                        new_img_row = df.loc[img[7:]].values
-                        new_img_row[0] = img
-                        #add new row to train_df with new index
-                        train_df.loc[img] = new_img_row
-                
-                #update train_class_count
+                print('Train DF sise: ', len(train_list))
+                print(train_df.head())
+                print('Test DF size: ', len(test_list))
+                print(test_df.head())
+
+                #calculate number of images in each class
+                classes = ['akiec', 'bcc', 'bkl', 'df', 'mel', 'nv', 'vasc']
+                self.num_classes = len(classes)
+                self.class_names = classes
                 train_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
+                train_df.set_index('image_id', inplace=True)
                 for img in train_list:
-                    label = df.loc[img, 'dx']
+                    label = train_df.loc[img, 'dx']
+                    train_class_count[label] += 1
+                print('Original Train Class count: ', train_class_count)
+
+                test_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
+                test_df.set_index('image_id', inplace=True)
+                for img in test_list:
+                    label = test_df.loc[img, 'dx']
+                    test_class_count[label] += 1
+                
+                print('Original Test Class count: ', test_class_count)
+
+                # Set the image_id as the index in data_pd
+                df.set_index('image_id', inplace=True)
+
+                #if preaugment is true then augment and save images to directory and update df with new files
+                if preaugment:
+                    print('Preaugmenting images')
+                    
+                    #count remaining images to add
+                    remaining_class_count = train_class_count.copy()
+                    for i in classes:
+                        remaining_class_count[i] = preaugment_size - train_class_count[i]
+                    print('Remaining Class Count To Add: ', remaining_class_count)
+
+                    #make temp folder for aug images
+                    if os.path.exists(os.path.join(root_dir,'aug_dir')):
+                        shutil.rmtree(os.path.join(root_dir,'aug_dir'))
+                    os.mkdir(os.path.join(root_dir,'aug_dir'))
+                    for i in classes:
+                        os.mkdir(os.path.join(root_dir,'aug_dir',i))
+
+                    #create final data folder
+                    if os.path.exists(os.path.join(root_dir,'C_'+str(preaugment_size))):
+                        shutil.rmtree(os.path.join(root_dir,'C_'+str(preaugment_size)))
+                    os.mkdir(os.path.join(root_dir,'C_'+str(preaugment_size)))
+
+                    #Augment imgs
+                    for class_name in classes:
+                        print('Aug Class: ',class_name)
+                        #make temp folder for original images
+                        if os.path.exists(os.path.join(root_dir,'temp_dir')):
+                            shutil.rmtree(os.path.join(root_dir,'temp_dir'))
+                        os.mkdir(os.path.join(root_dir,'temp_dir'))
+                        os.mkdir(os.path.join(root_dir,'temp_dir',class_name))
+
+                        #add original imgs to temp folders with class structure
+                        class_df = train_df.loc[train_df['dx']==class_name].copy()
+                        class_list = class_df.index
+                        for img in class_list:
+                            file_name = img+'.jpg'
+                            img_path = os.path.join(root_dir,'data',file_name)
+                            target_path = os.path.join(root_dir,'temp_dir',class_name,file_name)
+                            shutil.copy(img_path,target_path)
+
+                        #create data generator
+                        data_aug_gen = tf.keras.preprocessing.image.ImageDataGenerator(
+                            rotation_range=180,
+                            width_shift_range=0.1,
+                            height_shift_range=0.1,
+                            zoom_range=0.1,
+                            horizontal_flip=True,
+                            vertical_flip=True,
+                            fill_mode='nearest'
+                        )
+                        #create class seperated data generators
+                        source_path = os.path.join(root_dir,'temp_dir')
+                        save_path = os.path.join(root_dir,'aug_dir',class_name)
+                        #TODO add option to reduce large classes to wanted image count
+                        #aug_datagen = data_aug_gen.flow_from_directory(source_path,save_to_dir=save_path,save_format='jpg',save_prefix='aug',target_size=top_img_size,batch_size=bs,shuffle=True)
+                        
+                        #add agumented images to folder to make up a specified number
+                        num_new_items = remaining_class_count[class_name]
+                        source_list = os.listdir(os.path.join(source_path,class_name))
+                        for i in range(0,num_new_items):
+                            #choose random file to augment
+                            f_name = source_list[np.random.randint(0,len(source_list))]
+                            img = cv2.imread(os.path.join(source_path,class_name,f_name))
+                            aug_img_it = data_aug_gen.flow(x=np.expand_dims(img,0),batch_size=1)
+                            aug_img = next(aug_img_it)
+                            cv2.imwrite(os.path.join(save_path,'aug'+str(np.random.randint(100000))+'_'+f_name),np.squeeze(aug_img,axis=0))
+
+                        print('-->AugImgs: ',len(os.listdir(save_path)))
+                        print('--> OGImgs: ',len(os.listdir(os.path.join(source_path,class_name))))
+
+
+                        #transfer all of aug class to thefinal data folder
+                        for img in os.listdir(save_path):
+                            shutil.move(os.path.join(save_path,img),os.path.join(root_dir,'C_'+str(preaugment_size),img))
+
+                        #transfer all of og class to thefinal data folder
+                        s_path = os.path.join(source_path,class_name)
+                        for img in os.listdir(s_path):
+                            shutil.move(os.path.join(s_path,img),os.path.join(root_dir,'C_'+str(preaugment_size),img))
+
+                    #delete temp_dir
+                    shutil.rmtree(os.path.join(root_dir,'temp_dir'))
+
+                    #delete aug_dir
+                    shutil.rmtree(os.path.join(root_dir,'aug_dir'))
+
+                    #We now have a folder called 'C_1000' with 1000 images per class all in one folder
+                    #update the train_df with the new images
+                    #get list of images
+                    train_list = os.listdir(os.path.join(root_dir,'C_'+str(preaugment_size)))
+                    #if the image is not in the train_df then add it to the train_df
+                    for img in train_list:
+                        img = img[:-4]
+                        if img not in train_df.index:
+                            #copy row from index - aug
+                            m_img = img.split('_')
+                            m_img = m_img[1] + '_'+ m_img[2]
+                            new_img_row = train_df.loc[m_img].to_numpy(copy=True)
+                            #add new row to train_df with new index
+                            train_df.loc[img] = new_img_row
+                    
+                    #update train_class_count
+                    train_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
+                    
+                    for img in train_list:
+                        label = train_df.loc[img[:-4], 'dx']
+                        train_class_count[label] += 1
+                    print('Updated Train Class count via dir: ', train_class_count)
+
+                    train_list = list(train_df.index)
+                    train_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
+                    for img in train_list:
+                        label = train_df.loc[img, 'dx']
+                        train_class_count[label] += 1
+                    print('Updated Train Class count via dir: ', train_class_count)
+
+                    print('Total Train Imgs: ',len(train_list))
+                    data_dir = os.path.join(root_dir,'C_'+str(preaugment_size))
+
+                #change df to [id, img_name, label] format
+                train_df.reset_index(inplace=True)
+                train_df = train_df[['image_id','dx']]
+                train_df.columns = ['image_id','label']
+                train_df.to_csv(os.path.join(root_dir,'C_'+str(preaugment_size),'trainmetadata.csv'))
+                test_df.to_csv(os.path.join(root_dir,'C_'+str(preaugment_size),'testmetadata.csv'))
+
+                test_data_dir = os.path.join(root_dir,'data')
+                #Calculate any normalization values here
+                #TODO
+
+                #img_size=(299,299)
+            
+            else:
+                print('Data path exist')
+                train_df = pd.read_csv(os.path.join(root_dir,'C_'+str(preaugment_size),'trainmetadata.csv'))
+                test_df = pd.read_csv(os.path.join(root_dir,'C_'+str(preaugment_size),'testmetadata.csv'))
+                data_dir = os.path.join(root_dir,'C_'+str(preaugment_size))
+                test_data_dir = os.path.join(root_dir,'data')
+
+                train_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
+                train_list = os.listdir(data_dir)
+                for img in train_list:
+                    label = train_df.loc[img[:-4], 'dx']
                     train_class_count[label] += 1
                 print('Updated Train Class count: ', train_class_count)
-                data_dir = os.path.join(root_dir,'C_'+preaugment_size)
 
-            #change df to [id, img_name, label] format
-            train_df.reset_index(inplace=True)
-            train_df = train_df[['image_id','dx']]
-            train_df.columns = ['image_id','label']
-
-            #Calculate any normalization values here
-            #TODO
-
-            #img_size=(299,299)
-
-            return train_df, test_df, data_dir, os.path.join(root_dir,'data')
+            return train_df, test_df, data_dir, test_data_dir
 
 
 

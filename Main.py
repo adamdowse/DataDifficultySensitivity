@@ -20,7 +20,7 @@ def Main(config):
     
     #setup
     tf.keras.backend.clear_session()
-    wandb.init(project='DataDiffSens',config=config.__dict__)
+    #wandb.init(project='DataDiffSens',config=config.__dict__)
     #dataset = DataHandler.DataHandler(config)
     dataset = CustomImgGen.CustomImageGen(
         config.data,
