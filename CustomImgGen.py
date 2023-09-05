@@ -14,7 +14,7 @@ import cv2
 import time
 
 class CustomImageGen(tf.keras.utils.Sequence):
-    def __init__(self, DS_name, root_dir, meta_data_dir, batch_size, img_size, mask_metric='loss',trainsize=0.85,model_name='IRv2'):
+    def __init__(self, DS_name, root_dir, meta_data_dir, batch_size, img_size, mask_metric='loss',trainsize=0.85,model_name='IRv2',force=False):
         #get directory of images (no label seperation just a folder of images)
         #get csv file of labels
         #TODO condence to use config
@@ -37,7 +37,8 @@ class CustomImageGen(tf.keras.utils.Sequence):
                                                                                            self.meta_data_dir,
                                                                                            self.root_dir,
                                                                                            preaugment=True,
-                                                                                           preaugment_size=1000)
+                                                                                           preaugment_size=1000,
+                                                                                           force=force)
 
     def update_losses(self,model):
         #return the losses for all images in the train set
@@ -170,6 +171,7 @@ class CustomImageGen(tf.keras.utils.Sequence):
         if DS_name == 'HAM10000':
             #only create new data if force is true or folder or meta does not exist
             if force or not os.path.exists(os.path.join(root_dir,'C_'+str(preaugment_size))):
+                #TODO add checks for metadata
                 #adapted from SoftAttention paper
                 df = pd.read_csv(meta_data_dir)
                 df_count = df.groupby('lesion_id').count()
@@ -353,8 +355,11 @@ class CustomImageGen(tf.keras.utils.Sequence):
                 train_df.reset_index(inplace=True)
                 train_df = train_df[['image_id','dx']]
                 train_df.columns = ['image_id','label']
-                train_df.to_csv(os.path.join(root_dir,'C_'+str(preaugment_size),'trainmetadata.csv'))
-                test_df.to_csv(os.path.join(root_dir,'C_'+str(preaugment_size),'testmetadata.csv'))
+                test_df.reset_index(inplace=True)
+                test_df = test_df[['image_id','dx']]
+                test_df.columns = ['image_id','label']
+                train_df.to_csv(os.path.join(root_dir,'C_'+str(preaugment_size)+'trainmetadata.csv'))
+                test_df.to_csv(os.path.join(root_dir,'C_'+str(preaugment_size)+'testmetadata.csv'))
 
                 test_data_dir = os.path.join(root_dir,'data')
                 #Calculate any normalization values here
@@ -364,17 +369,34 @@ class CustomImageGen(tf.keras.utils.Sequence):
             
             else:
                 print('Data path exist')
-                train_df = pd.read_csv(os.path.join(root_dir,'C_'+str(preaugment_size),'trainmetadata.csv'))
-                test_df = pd.read_csv(os.path.join(root_dir,'C_'+str(preaugment_size),'testmetadata.csv'))
+                train_df = pd.read_csv(os.path.join(root_dir,'C_'+str(preaugment_size)+'trainmetadata.csv'))
+                test_df = pd.read_csv(os.path.join(root_dir,'C_'+str(preaugment_size)+'testmetadata.csv'))
                 data_dir = os.path.join(root_dir,'C_'+str(preaugment_size))
                 test_data_dir = os.path.join(root_dir,'data')
+                train_df.set_index('image_id', inplace=True)
+                test_df.set_index('image_id', inplace=True)
 
                 train_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
                 train_list = os.listdir(data_dir)
+                print('Total Train Img: ',len(train_list))
                 for img in train_list:
-                    label = train_df.loc[img[:-4], 'dx']
+                    label = train_df.loc[img[:-4], 'label']
                     train_class_count[label] += 1
-                print('Updated Train Class count: ', train_class_count)
+                print('Train Class count via dir: ', train_class_count)
+
+                train_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
+                train_list = list(train_df.index)
+                for img in train_list:
+                    label = train_df.loc[img, 'label']
+                    train_class_count[label] += 1
+                print('Train Class count via DataFrame: ', train_class_count)
+
+                test_class_count = {'akiec':0, 'bcc':0, 'bkl':0, 'df':0, 'mel':0, 'nv':0, 'vasc':0}
+                test_list = list(test_df.index)
+                for img in test_list:
+                    label = test_df.loc[img, 'label']
+                    test_class_count[label] += 1
+                print('Test Class count: ', test_class_count)
 
             return train_df, test_df, data_dir, test_data_dir
 

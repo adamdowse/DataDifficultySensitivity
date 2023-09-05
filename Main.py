@@ -29,7 +29,8 @@ def Main(config):
         config.batch_size,
         config.img_size,
         trainsize = config.train_test_split,
-        model_name = config.model_name)
+        model_name = config.model_name,
+        force = False)
     model = Models.Models(config,dataset.num_classes)
     #model.config.weighted_train_acc_sample_weight = dataset.config.weighted_train_acc_sample_weight
 
@@ -181,7 +182,7 @@ if __name__ == "__main__":
 
             #Results
             self.group = 'TestT5'
-            self.weighted_train_acc_sample_weight = [1,1,1,1,5,1,1] #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
+            self.acc_sample_weight = [1,1,1,1,5,1,1] #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.record_FIM = False                 #record the full FIM    
             self.record_highloss_FIM = False        #record the FIM of the high loss samples
             self.record_lowloss_FIM = False         #record the FIM of the low loss samples

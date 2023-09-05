@@ -322,6 +322,7 @@ class Models():
                 tf.keras.layers.Dropout(0.5),
                 tf.keras.layers.Dense(self.num_classes,activation='softmax')])
             self.output_is_logits = False
+
         elif self.config.model_name == "IRv2":
             irv2 = tf.keras.applications.InceptionResNetV2(
                 include_top=True,
@@ -353,7 +354,7 @@ class Models():
 
     def model_compile(self):
         self.model.summary()
-        self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=[tf.keras.metrics.Accuracy(),tf.keras.metrics.Accuracy(name='weighted_accuracy'),tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
+        self.model.compile(optimizer=self.optimizer,loss=self.loss_func)
         
 
     def lr_schedule(self,epoch,init=False):
@@ -385,17 +386,16 @@ class Models():
         self.weighted_train_acc_metric.reset_states()
         self.test_prec_metric.reset_states()
         self.test_rec_metric.reset_states()
-        return
     
     def early_stop(self):
         #this needs to define the early stop
         #returns true if early stop is triggered
         #check test accuracy
-        if self.test_results[1] > self.max_acc:
-            self.max_acc = self.test_results[1]
+        if self.test_acc_metric.results > self.max_acc:
+            self.max_acc = self.test_acc_metric.results
         
         if self.epoch_num_adjusted > self.config.early_stop_epoch:
-            if self.test_results[1] < self.max_acc:
+            if self.test_acc_metric.results < self.max_acc:
                 self.early_stop_count += 1
             else:
                 self.early_stop_count = 0
@@ -412,7 +412,7 @@ class Models():
         t = time.time()
         loss_spectrum = np.zeros((dataset.total_train_data_points,1))
         for i in range(dataset.total_train_data_points):
-            img,label = dataset.__getitem__(i,training=False,return_loss=False)
+            img,label = dataset.__getitem__(i)
             loss_spectrum[i] = self.get_item_loss(img,label,training=False)
         print('--> time: ',time.time()-t)
         return loss_spectrum
@@ -533,6 +533,7 @@ class Models():
         return loss
 
     @tf.function
+    #this is the same as above?
     def get_batch_loss(self,imgs,labels,training=False):
         preds = self.model(imgs,training=training)
         loss = self.loss_func(labels,preds)
