@@ -14,11 +14,12 @@ import cv2
 import time
 
 class CustomImageGen(tf.keras.utils.Sequence):
-    def __init__(self, DS_name, root_dir, meta_data_dir, batch_size, img_size,acc_sample_weight, mask_metric='loss',trainsize=0.85,model_name='IRv2',force=False):
+    def __init__(self, strategy,DS_name, root_dir, meta_data_dir, batch_size, img_size,acc_sample_weight, mask_metric='loss',trainsize=0.85,model_name='IRv2',force=False,preaugment_size =1000):
         #get directory of images (no label seperation just a folder of images)
         #get csv file of labels
         #TODO condence to use config
 
+        self.strategy = strategy #strategy for distributed training
         self.DS_name = DS_name #name of dataset
         self.model_name = model_name #name of model to use for preprocessing
         self.root_dir = root_dir #directory with folder of images inside Root_dir/DS_name/data/imgs.jpg
@@ -28,7 +29,7 @@ class CustomImageGen(tf.keras.utils.Sequence):
         self.mask_metric = mask_metric #metric to select images based on
         self.trainsize = trainsize #percentage of images to use for training
         self.epoch_num = 0 #current epoch number
-        self.adjusted_epoch_num = 0 #current epoch number adjusted for method changes (can be float)
+        self.epoch_num_adjusted = 0 #current epoch number adjusted for method changes (can be float)
         self.batch_num = 0 #current batch number
         self.acc_sample_weight = acc_sample_weight
         
@@ -38,7 +39,7 @@ class CustomImageGen(tf.keras.utils.Sequence):
                                                                                            self.meta_data_dir,
                                                                                            self.root_dir,
                                                                                            preaugment=True,
-                                                                                           preaugment_size=1000,
+                                                                                           preaugment_size=preaugment_size,
                                                                                            force=force)
         
         self.indexes = self.train_df.index.values #indexes of images in the train set
@@ -47,9 +48,32 @@ class CustomImageGen(tf.keras.utils.Sequence):
         #return the losses for all images in the train set
         self.losses = np.zeros(len(self.indexes))
         self.update_mask(method='All')
-        for i in range(self.num_train_batches):
-            imgs,labels = self.__getitem__(i,training_set=True)
-            self.losses[i*self.batch_size:(i+1)*self.batch_size] = model.get_items_loss(imgs,labels,training=False)
+        self.build_batches(training_set=True)
+        c=0
+        for i in range(self.num_batches):
+            imgs,labels = self.__getitem__(i)
+            losses = model.get_items_loss(imgs,labels,training=False)
+            if c == 0:
+                self.losses = losses
+            else:
+                self.losses = np.append(self.losses,losses)
+            c += 1
+    
+    def build_generator(self,method='All',training_set=True,batch_size=None,percentage=None,split_type=None,stage=None):
+        replica_count = self.strategy.num_replicas_in_sync
+        print('Replica Count: ',replica_count)
+        if batch_size is None:
+            batch_size = self.batch_size
+
+        self.update_mask(method=method)
+        self.build_batches(training_set=training_set,batch_size=self.batch_size)
+        print('Batch Size: ',batch_size)
+
+        #create the generator
+        gen_dataset = 
+
+
+            
         
 
     def update_mask(self,method='All',split_type=None,percentage=None,stage=None):
@@ -58,6 +82,7 @@ class CustomImageGen(tf.keras.utils.Sequence):
         #update the mask array
         print('Updating Mask with method: ',method,' and split type: ',split_type,' and percentage: ',percentage,' and stage: ',stage)
         t = time.time()
+        self.indexes = self.train_df.index.values
         if method == 'All':
             #keep all images in the mask
             self.mask = np.ones(len(self.indexes))
@@ -85,11 +110,13 @@ class CustomImageGen(tf.keras.utils.Sequence):
                 stage_loss_indexes = np.argsort(self.losses)[stage*int(percentage*len(self.indexes)):(stage+1)*int(percentage*len(self.indexes))]
                 #set the mask to 1 for the images with loss between stages
                 self.mask[stage_loss_indexes] = 1
+        elif method == 'Test':
+            print('Test Mask Update')
         else:
             print('Invalid Mask Update Method')
         print('Mask Update Time: ',time.time()-t)
         
-    def build_batches(self,batch_size=None):
+    def build_batches(self,batch_size=None,training_set=True,distributed=False):
         print('Building Batches')
         #this is run before the start of each traingin cycle, inclusing test set
         #update the mask array based on the new metric
@@ -98,70 +125,57 @@ class CustomImageGen(tf.keras.utils.Sequence):
         if batch_size is None:
             batch_size = self.batch_size
 
-        self.indexes = self.train_df.index.values
-        self.indexes = self.indexes[self.mask.astype(bool)]
+        if training_set:
+            df = self.train_df
+            self.di = self.data_dir
+        else:
+            df = self.test_df
+            self.di = self.test_data_dir
+
+
+        self.indexes = df.index.values
+        if training_set:
+            self.indexes = self.indexes[self.mask.astype(bool)]
         num_images = len(self.indexes)
             
         #shuffle and batch the indexes
         np.random.shuffle(self.indexes)
+
+        #get the labels into memory
+        self.labels = df.loc[self.indexes,'label'].to_numpy()
+        for i in range(len(self.labels)):
+            self.labels[i] = self.class_names.index(self.labels[i])
+
         if num_images % batch_size == 0:
-            self.num_train_batches = num_images // batch_size
+            self.num_batches = num_images // batch_size
         else:
-            self.num_train_batches = (num_images // batch_size) + 1
-        split_points = [i*batch_size for i in range(1,self.num_train_batches)]
+            self.num_batches = (num_images // batch_size) + 1
+
+        split_points = [i*batch_size for i in range(1,self.num_batches)]
         self.indexes = np.array_split(self.indexes,split_points)
-        print('--> Num Batches: ',self.num_train_batches, 'Num Images: ',num_images, 'Batch Size: ',batch_size)
+        self.labels = np.array_split(self.labels,split_points)
 
-        #test batches
-        self.test_indexes = self.test_df.index.values
-        np.random.shuffle(self.test_indexes)
-        num_images = len(self.test_indexes)
-        if num_images % batch_size == 0:
-            self.num_test_batches = num_images // batch_size
-        else:
-            self.num_test_batches = (num_images // batch_size) + 1
-        split_points = [i*batch_size for i in range(1,self.num_test_batches)]
-        self.test_indexes = np.array_split(self.test_indexes,split_points)
+        print('--> Num Batches: ',self.num_batches, 'Num Images: ',num_images, 'Batch Size: ',batch_size)
 
-
-            
-
-    def on_epoch_end(self,method='Vanilla'):
-        #update the epoch number
-        self.epoch_num += 1
-        if method == 'HighLossPercentage':
-            self.epoch_num_adjusted += 1 #TODO CHANGE THIS
-            self.batch_num += self.num_train_batches
-        elif method == 'Vanilla':
-            self.epoch_num_adjusted += 1
-            self.batch_num += self.num_train_batches
-
-    def __getitem__(self, index, training_set=True):
+    def __getitem__(self, index):
         #return the batch as a tensor of images and labels
-        if training_set:
-            df = self.train_df
-            di = self.data_dir
-            ind = self.indexes
-        else:
-            df = self.test_df
-            di = self.test_data_dir
-            ind = self.test_indexes
         #get the indexes for the batch
-        batch_indexes = ind[index]
+        batch_indexes = self.indexes[index]
 
         #load the images
-        batch_images = []
+        c = 0
         for i in batch_indexes:
-            img = tf.keras.preprocessing.image.load_img(os.path.join(di,i+'.jpg'),target_size=self.img_size)
+            d = os.path.join(self.di,str(i)+'.jpg')
+            img = tf.keras.preprocessing.image.load_img(d,target_size=self.img_size)
             img = tf.keras.preprocessing.image.img_to_array(img)
-            batch_images.append(img)
+            if c == 0:
+                batch_images = np.expand_dims(img,axis=0)
+            else:
+                batch_images = np.append(batch_images,np.expand_dims(img,axis=0),axis=0)
+            c += 1
         batch_images = tf.convert_to_tensor(batch_images)
 
-        #get the labels from the indexes
-        batch_labels = df.loc[batch_indexes,'label'].to_numpy()
-        #convert to indecies
-        for i in range(len(batch_labels)):
-            batch_labels[i] = self.class_names.index(batch_labels[i])
+        batch_labels = self.labels[index]
         batch_labels = tf.convert_to_tensor(batch_labels,dtype=tf.int32)
 
         #preprocess step
@@ -172,7 +186,15 @@ class CustomImageGen(tf.keras.utils.Sequence):
         
         return batch_images, batch_labels
 
-
+    def on_epoch_end(self,method='Vanilla'):    
+        #update the epoch number
+        self.epoch_num += 1
+        if method == 'HighLossPercentage':
+            self.epoch_num_adjusted += 1 #TODO CHANGE THIS
+            self.batch_num += self.num_train_batches
+        elif method == 'Vanilla':
+            self.epoch_num_adjusted += 1
+            self.batch_num += self.num_train_batches
 
     def __len__(self):
         #return the number of batches per epoch
@@ -421,8 +443,6 @@ class CustomImageGen(tf.keras.utils.Sequence):
                 self.num_classes = 7
                 self.class_names = ['akiec', 'bcc', 'bkl', 'df', 'mel', 'nv', 'vasc']
             
-            self.acc_sample_weight = [[self.acc_sample_weight[i]] for i in range(len(self.acc_sample_weight))]
-            self.acc_sample_weight = np.array([self.acc_sample_weight for i in range(self.batch_size)])
             print('--> Weighted Train Acc Sample Weight shape: ',self.acc_sample_weight.shape)
 
             return train_df, test_df, data_dir, test_data_dir

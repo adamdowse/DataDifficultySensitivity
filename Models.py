@@ -1,6 +1,7 @@
 #This is a repository for the models used in the project 
 #it should also contain the hyperparameters for the runs
 
+from keras.src.utils import losses_utils
 import tensorflow as tf
 import wandb   
 from tensorflow import keras
@@ -12,8 +13,9 @@ import numpy as np
 
 
 class Models():
-    def __init__(self,config,num_classes):
+    def __init__(self,config,num_classes,strategy):
         #this needs to define hyperparams as well as the model
+        self.strategy = strategy
         self.epoch_num = 0
         self.epoch_num_adjusted = 0.0
         self.batch_num = 0
@@ -32,41 +34,81 @@ class Models():
     def optimizer_init(self):
         print('INIT: Optimizer: ',self.config.optimizer)
         #this needs to define the optimizer
-        self.lr_schedule(0,init=True)
-        if self.config.optimizer == 'Adam':
-            #lr decay params = [epsilon] defult = [1e-7]
-            self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config.lr, beta_1=0.9, beta_2=0.999, epsilon=self.config.lr_decay_param[0], amsgrad=False)
-        elif self.config.optimizer == 'SGD':
-            self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config.lr)
-        elif self.config.optimizer == 'Momentum':
-            self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config.lr,momentum=self.config.momentum)
-        else:
-            print('Optimizer not recognised')    
+        with self.strategy.scope():
+            self.lr_schedule(0,init=True)
+            if self.config.optimizer == 'Adam':
+                #lr decay params = [epsilon] defult = [1e-7]
+                self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config.lr, beta_1=0.9, beta_2=0.999, epsilon=self.config.lr_decay_param[0], amsgrad=False)
+            elif self.config.optimizer == 'SGD':
+                self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config.lr)
+            elif self.config.optimizer == 'Momentum':
+                self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config.lr,momentum=self.config.momentum)
+            else:
+                print('Optimizer not recognised')    
 
     def loss_func_init(self):
         print('INIT: Loss: ',self.config.loss_func)
         #this needs to define the loss function
         #TODO add more loss functions
+        with self.strategy.scope():
+            if self.config.loss_func == 'categorical_crossentropy' and self.config.acc_sample_weight == None:
+                #self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config.label_smoothing)
+                self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config.label_smoothing,reduction=tf.keras.losses.Reduction.NONE)
+            elif self.config.loss_func == 'categorical_crossentropy':
+                #weighted categorical crossentropy
+                class WeightedCategoricalCrossentropy(tf.keras.losses.Loss):
+                    def __init__(self, class_weights, reduction=tf.keras.losses.Reduction.NONE, from_logits=False, label_smoothing=0, name=None):
+                        super().__init__(reduction, name)
+                        self.label_smoothing = label_smoothing
+                        self.from_logits = from_logits
+                        self.class_weights = class_weights # shape (num_classes,)
+                        self.class_weights = tf.cast(self.class_weights, tf.float32)
+                    
+                    #def __call__(self, y_true, y_pred, sample_weight=self.class_weights):
+                    #    return super().__call__(y_true, y_pred, sample_weight)
 
-        if self.config.loss_func == 'categorical_crossentropy':
-            self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config.label_smoothing)
-            self.no_reduction_loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config.label_smoothing,reduction=tf.keras.losses.Reduction.NONE)
-        else:
-            print('Loss not recognised')
+                    def weighted_categorical_crossentropy(self,y_true, y_pred):
+                        # Calculate the loss between y_pred and y_true as batches
+                        if self.from_logits:
+                            y_pred = tf.keras.activations.softmax(y_pred, axis=-1)
+                        # Calculate the loss between y_pred and y_true
+                        loss = tf.keras.losses.categorical_crossentropy(y_true, y_pred, from_logits= self.from_logits,label_smoothing=self.label_smoothing)
+                        # Make class_weights broadcastable and multiply them with the losses
+                        class_weights = tf.broadcast_to(self.class_weights, tf.shape(loss))
+                        # Calculate the weight vector shape (batch_size,num_classes) * (batch_size, num_classes) = (batch_size, num_classes)
+                        weights = tf.reduce_sum(y_true * class_weights, axis=1)
+                        # Apply the weights to the loss
+                        loss = tf.multiply(loss, weights)
+                        
+                        #deal with reduction
+                        if self.reduction == tf.keras.losses.Reduction.SUM:
+                            return tf.reduce_sum(loss)
+                        elif self.reduction == tf.keras.losses.Reduction.NONE:
+                            return loss
+                        elif self.reduction == tf.keras.losses.Reduction.AUTO:
+                            return tf.reduce_mean(loss)
+                        else:
+                            print('Reduction not recognised')
+                        
+                    def call(self, y_true, y_pred):
+                        return self.weighted_categorical_crossentropy(y_true, y_pred)
+                    
+                #self.loss_func = WeightedCategoricalCrossentropy(self.config.acc_sample_weight,reduction=tf.keras.losses.Reduction.AUTO,label_smoothing=self.config.label_smoothing,from_logits=self.output_is_logits)
+                self.loss_func = WeightedCategoricalCrossentropy(self.config.acc_sample_weight,reduction=tf.keras.losses.Reduction.NONE,label_smoothing=self.config.label_smoothing,from_logits=self.output_is_logits)
+            else:
+                print('Loss not recognised')
 
     def metrics_init(self):
         print('INIT: Metrics')
-        self.train_loss_metric = tf.keras.metrics.Mean(name='train_loss')
-        self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
-        self.weighted_train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='weighted_train_accuracy')
-        self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
-        self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
+        with self.strategy.scope():
+            self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
+            self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
+            self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
 
-        self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
-        self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
-        self.weighted_test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='weighted_train_accuracy')
-        self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
-        self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
+            self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
+            self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
+            self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
+            self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
 
     def model_init(self):
         def build_resnet(x,vars,num_classes,REG=0):
@@ -378,13 +420,11 @@ class Models():
         #Reset the metrics at the start of the next epoch
         self.train_loss_metric.reset_states()
         self.train_acc_metric.reset_states()
-        self.weighted_train_acc_metric.reset_states()
         self.train_prec_metric.reset_states()
         self.train_rec_metric.reset_states()
 
         self.test_loss_metric.reset_states()
         self.test_acc_metric.reset_states()
-        self.weighted_train_acc_metric.reset_states()
         self.test_prec_metric.reset_states()
         self.test_rec_metric.reset_states()
     
@@ -418,15 +458,13 @@ class Models():
         print('--> time: ',time.time()-t)
         return loss_spectrum
 
-    def log_metrics(self):
-        wandb.log({'train_loss':self.train_loss_metric.result(),
+    def log_metrics(self,train_loss):
+        wandb.log({'train_loss':train_loss,
                    'train_acc':self.train_acc_metric.result(),
-                   'weighted_train_acc':self.weighted_train_acc_metric.result(),
                    'train_prec':self.train_prec_metric.result(),
                    'train_rec':self.train_rec_metric.result(),
                    'test_loss':self.test_loss_metric.result(),
                    'test_acc':self.test_acc_metric.result(),
-                   'weighted_test_acc':self.weighted_test_acc_metric.result(),
                    'max_test_acc':self.max_acc,
                    'test_prec':self.test_prec_metric.result(),
                    'test_rec':self.test_rec_metric.result(),
@@ -434,31 +472,37 @@ class Models():
                    "adjusted_epoch":self.epoch_num_adjusted},
                    step=self.epoch_num)
 
-    def calc_FIM(self,dataset):
+    def calc_dist_FIM(self,dataset,config):
         #this needs to define the FIM
         #calc fim diag
         print('FIM: Calculating FIM')
         t = time.time()
+        replica_count = self.strategy.num_replicas_in_sync
+        dataset.update_mask(method='All')
+        dataset.build_batches(batch_size=replica_count)#global BS=replica_count
+        gen_dataet = gen_dataset = tf.data.Dataset.from_generator(dataset.generator, 
+                                                     output_types=(tf.float32, tf.float32),
+                                                     output_shapes=((replica_count,config.img_size[0],
+                                                                     config.img_size[1],
+                                                                     config.img_size[2]),
+                                                                     (replica_count,dataset.num_classes)))
+        dist_dataset = self.strategy.experimental_distribute_dataset(gen_dataset) #this rebatches to BS/num_devices
         data_count = 0
-        msq = 0
-        lower_lim = np.min([self.config.record_FIM_n_data_points,dataset.total_train_data_points])
-        for i in range(lower_lim):
-            img,_ = dataset.__getitem__(i)#returns a batch
-            data_count += 1
-            #calc sum of squared grads for a data point and class square rooted
-            z = self.Get_Z(img)
-            if data_count == 1:
-                mean = z
-            delta = z - mean
-            mean += delta / (data_count+1) #Welford_cpp from web
-            msq += delta * (z - mean)
-
-        train_FIM = mean
-        train_FIM_var = msq/(data_count-1)
-        print('--> time: ',time.time()-t)
-        return train_FIM,train_FIM_var
-
+        lower_lim = np.min([self.config.record_FIM_n_data_points,dataset.num_batches])
+        data_count = 0
         
+        s = 0
+        for i in range(lower_lim):
+            s += self.distributed_FIM_step(iter(dist_dataset))#send a bs=1 to each replica
+            data_count += replica_count
+        mean = s/data_count
+        print('--> time: ',time.time()-t)
+        return mean
+
+    def distributed_FIM_step(self,imgs,labels):#should be a batch of size 1
+        replica_grads = self.strategy.run(self.Get_Z,args=(imgs,)) #this should return a list of grads for each replica
+        return self.strategy.reduce(tf.distribute.ReduceOp.SUM, replica_grads,axis=None) #sum the grads over all replicas
+
     @tf.function
     def Get_Z(self,img):
         #returns the z value for a given x and y
@@ -468,39 +512,48 @@ class Models():
             output = tf.math.log(output[0,tf.random.categorical(tf.math.log(output), 1)[0][0]])
 
         grad = tape.gradient(output,self.model.trainable_variables) #all grads 
-        #select the weights
-        #grads = [g for g in grads if ('Filter' in g.name) or ('MatMul' in g.name)]
         grad = [tf.reshape(g,[-1]) for g in grad] #flatten grads
         grad = tf.concat(grad,0) #concat grads
         grad = tf.math.square(grad) #all grads ^2
         grad = tf.math.reduce_sum(grad) #sum of grads
-        return grad
+        return grad #single value
+    
+    def compute_loss(self,labels,preds):
+        with self.strategy.scope():
+            per_example_loss = self.loss_func(labels,preds)
+            loss = tf.nn.compute_average_loss(per_example_loss)
+        return loss
 
     @tf.function
     def train_step(self,imgs,labels):
         with tf.GradientTape() as tape:
             preds = self.model(imgs,training=True)
-            loss = self.loss_func(labels,preds)
-        grads = tape.gradient(loss,self.model.trainable_variables)
+            loss = self.compute_loss(labels,preds)
+        grads = tape.gradient(loss,self.model.trainable_variables,)
         self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
-        self.train_loss_metric(loss)
-        self.train_acc_metric(labels,preds)
-        #ensure the weighted accuracy is calculated with the correct sample weight and convert sample weight to shape [batchsize,7]
-        self.weighted_train_acc_metric(labels,preds,sample_weight=self.config.acc_sample_weight)
-        self.train_prec_metric(labels,preds)
-        self.train_rec_metric(labels,preds)
+        self.train_loss_metric.update_state(loss)
+        self.train_acc_metric.update_state(labels,preds)
+        self.train_prec_metric.update_state(labels,preds)
+        self.train_rec_metric.update_state(labels,preds)
 
     @tf.function
     def test_step(self,imgs,labels):
         with tf.GradientTape() as tape:
             preds = self.model(imgs,training=False)
             loss = self.loss_func(labels,preds)
-        self.test_loss_metric(loss)
-        self.test_acc_metric(labels,preds)
-        #ensure the weighted accuracy is calculated with the correct sample weight and convert sample weight to shape [batchsize,7]
-        self.weighted_test_acc_metric(labels,preds,sample_weight=self.config.acc_sample_weight)
-        self.test_prec_metric(labels,preds)
-        self.test_rec_metric(labels,preds)
+        self.test_loss_metric.update_state(loss)
+        self.test_acc_metric.update_state(labels,preds)
+        self.test_prec_metric.update_state(labels,preds)
+        self.test_rec_metric.update_state(labels,preds)
+
+    @tf.function
+    def distributed_train_step(self,imgs,labels): #imgsand labels are dist batches
+        per_replica_losses = self.strategy.run(self.train_step,args=(imgs,labels))#run the train step on each replica
+        return self.strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses,axis=None)
+    
+    @tf.function
+    def distributed_test_step(self,imgs,labels):
+        return self.strategy.run(self.test_step,args=(imgs,labels))
 
     @tf.function
     def norm_train_step(self,imgs,labels):
@@ -511,7 +564,6 @@ class Models():
         self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
         self.train_loss_metric(loss)
         self.train_acc_metric(labels,preds)
-        self.weighted_train_acc_metric(labels,preds,sample_weight=self.config.weighted_train_acc_sample_weight)
         self.train_prec_metric(labels,preds)
         self.train_rec_metric(labels,preds)
 

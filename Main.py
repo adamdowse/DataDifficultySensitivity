@@ -20,9 +20,12 @@ def Main(config):
     
     #setup
     tf.keras.backend.clear_session()
+    strategy = tf.distribute.MirroredStrategy()
+    print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
     #wandb.init(project='DataDiffSens',config=config.__dict__)
     #dataset = DataHandler.DataHandler(config)
     dataset = CustomImgGen.CustomImageGen(
+        strategy,
         config.data,
         config.ds_path,
         config.meta_data_path,
@@ -31,8 +34,10 @@ def Main(config):
         config.acc_sample_weight,
         trainsize = config.train_test_split,
         model_name = config.model_name,
+        preaugment_size=config.preaugment,
         force = False)
-    model = Models.Models(config,dataset.num_classes)
+    with strategy.scope():
+        model = Models.Models(config,dataset.num_classes)
     model.config.acc_sample_weight = dataset.acc_sample_weight
 
     #Training
@@ -74,11 +79,21 @@ def Main(config):
         #Training
         print("Training")
         t = time.time()
-        for i in range(dataset.num_train_batches):
-            print(i)
-            imgs,labels = dataset.__getitem__(i)
-            model.train_step(imgs,labels)
+        if dataset.num_batches > config.steps_per_epoch: dataset.num_batches = config.steps_per_epoch
+        total_loss = 0
+        num_batches = 0
+        gen_dataset = tf.data.Dataset.from_generator(dataset.generator, 
+                                                     output_types=(tf.float32, tf.float32),
+                                                     output_shapes=((config.batch_size,config.img_size[0],
+                                                                     config.img_size[1],
+                                                                     config.img_size[2]),
+                                                                     (config.batch_size,dataset.num_classes)))
+        dist_dataset = strategy.experimental_distribute_dataset(gen_dataset) #this rebatches to BS/num_devices
+        for x in dist_dataset:
+            total_loss += model.distributed_train_step(x[0],x[1]) #this returns the full batch loss
+            num_batches += 1
             model.batch_num += 1
+        train_loss = total_loss/num_batches
         print("Epoch ",model.epoch_num, "Training Time: ",time.time()-t)
 
         dataset.on_epoch_end(method=method)
@@ -86,9 +101,10 @@ def Main(config):
         #Testing
         print("Testing")
         t = time.time()
-        for i in range(dataset.num_test_batches):
-            imgs,labels = dataset.__getitem__(i,training_set=False)
-            model.test_step(imgs,labels)
+        dataset.build_batches(training_set=False)
+        for i in range(dataset.num_batches):
+            imgs,labels = dataset.__getitem__(i)
+            model.distributed_test_step(imgs,labels)
         #model.test_results = model.model.evaluate(dataset.test_tfds)
         print("Testing Time: ",time.time()-t)
 
@@ -142,7 +158,7 @@ def Main(config):
             wandb.log({'LossSpectrum':loss_spectrum},step=model.epoch_num)
             
         #WandB logging
-        model.log_metrics()
+        model.log_metrics(train_loss)
         if config.record_FIM:
             wandb.log({'FullFIM':FullFIM,'FullFIMVar':FullFIMVar},step=model.epoch_num)
         if config.record_highloss_FIM:
@@ -185,6 +201,7 @@ if __name__ == "__main__":
             self.epochs = 150               #max number of epochs
             self.early_stop = 150           #number of epochs below threshold before early stop
             self.early_stop_epoch = 150     #epoch to start early stop
+            self.steps_per_epoch = 1000      #number of batches per epoch
 
             #Results
             self.group = 'TestT5'
@@ -203,6 +220,7 @@ if __name__ == "__main__":
             self.meta_data_path = '/com.docker.devenvironments.code/HAM10000/HAM10000_metadata.csv' #path to csv
             self.data_percentage = 1        #1 is full dataset HAM not implemented
             self.train_test_split = 0.85    #percentage of data to use for training
+            self.preaugment = 1000          #number of images to preaugment
             self.label_smoothing = 0        #0 is no smoothing
             self.misslabel = 0              #0 is no misslabel
             self.data_augmentation = False  #Not implemented
