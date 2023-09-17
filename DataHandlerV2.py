@@ -1,4 +1,3 @@
-#testing the generator on multi gpus
 import os
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -6,11 +5,21 @@ import pandas as pd
 import numpy as np
 import time
 
-
-
-
+#this holds is the class for handling all data related tasks
 
 class Data():
+    #this is the class for handling all data related tasks
+
+    #to use all data for an epoch use 
+    #   data.reduce_data("all")
+    #   dataset, num_batches = data.init_data(bs,train=True,distributed=False,shuffle=True)
+
+    #to use staged data for an epoch use based on loss
+    #   data.get_loss(model,bs)
+    #   data.reduce_data("loss",[0.0,0.5])
+    #   dataset, num_batches = data.init_data(bs,train=True,distributed=False,shuffle=True)
+
+    #load the metadata and create the tf.data datasets that can be distributed
     def __init__(self,strategy,data_dir,preaugment_size,img_size):
         #requires the file stucture to be
         #data_dir
@@ -68,6 +77,7 @@ class Data():
         self.train_index_mask = np.array([True]*len(self.train_img_names))
         self.test_index_mask = np.array([True]*len(self.test_img_names)) #this should always be true for all the data
 
+    #check if the data is in the correct format
     def __check_dirs(self):
         #returns true if the data is in the correct format
         #check if the data is in the correct format
@@ -88,6 +98,7 @@ class Data():
         else:
             return True
         
+    #get the loss information for the next epoch
     def get_loss(self,model,bs=12):
         #get the loss of the data
         #build dataset
@@ -100,6 +111,7 @@ class Data():
             losses = np.append(losses,model.get_losses(batch[0],batch[1]))
         self.losses = np.array([np.random.rand() for i in range(len(self.train_img_names))])
 
+    #reduce the data to the number of images wanted by creating a mask to limited data used
     def reduce_data(self,method,params=None):
         #reduce the data to the number of images wanted
         #this will be done by creating a mask for the data
@@ -121,6 +133,7 @@ class Data():
         else:
             raise ValueError("Invalid method, please use 'all' or 'half'")
 
+    #take the data to be used in next epoch and create the tf.data datasets that can be distributed
     def init_data(self,bs,train=True,distributed=True,shuffle=True):
         #take the data to be used in next epoch and create the data
         if train:
@@ -168,99 +181,3 @@ class Data():
             dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
         return dataset, int(num_data/bs)
-
-
-
-class model():
-    def __init__(self):
-        pass
-    def get_losses(self,x,y):
-        return np.array([np.random.rand() for i in range(len(x))])
-
-def new_main():
-
-    strategy = tf.distribute.MirroredStrategy()
-    print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
-    data_dir = "/com.docker.devenvironments.code/CIFAR10/"
-    preaugment_size = 0
-    data = Data(strategy,data_dir,preaugment_size,[32,32,3])
-    m = model()
-    print(data.train_img_names)
-    print(data.train_img_labels)
-    test_dataset,test_batches = data.init_data(10,train=False,distributed=False) #returns a dataset
-    train_dataset,train_batches = data.init_data(12,train=True,distributed=True) #returns a dataset
-    print("Test dataset: ",test_dataset)
-    print("Train dataset: ",train_dataset)
-    print("Test num: ",test_batches)
-    print("Train num: ",train_batches)
-    data.get_loss(m)
-    print(len(data.losses))
-    train_dataset = data.reduce_data("loss",[0.1,0.2])
-    print(data.train_index_mask)
-    train_dataset,train_num = data.init_data(12,train=True,distributed=True) #returns a dataset
-    print("Train num: ",train_num)
-
-    for item in train_dataset:
-        print(item)
-        
-
-
-def batch_FIM():
-    tf.random.set_seed(0)
-    x = tf.random.uniform((10,3))
-    y = tf.random.uniform((10,2))
-    w = tf.random.uniform((3,2))
-    loss_func = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.NONE)
-    print('jacobian of batch')
-    with tf.GradientTape() as tape:
-        tape.watch(w)
-        y_hat = tf.matmul(x,w)
-        loss = loss_func(y,y_hat)
-    print(loss)
-    g = tape.jacobian(loss,w)
-    print(g)
-
-    print('gradient of item')
-    x_single = tf.expand_dims(x[0],axis=0)
-    y_single = tf.expand_dims(y[0],axis=0)
-    with tf.GradientTape() as tape:
-        tape.watch(w)
-        y_hat = tf.matmul(x_single,w)
-        output = tf.math.log(y_hat[0,tf.random.categorical(tf.math.log(y_hat), 1)[0][0]])
-    grad = tape.gradient(output,w)
-    print(grad)
-
-    print('output of batch')
-    with tf.GradientTape() as tape:
-        tape.watch(w)
-        y_hat = tf.matmul(x,w)
-        print('yhat')
-        print(y_hat)
-        selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1))
-        print('sel')
-        print(selected)
-        output = tf.gather(y_hat,selected,axis=1,batch_dims=1)
-        print('output')
-        print(output)
-        output = tf.math.log(output)
-    print(output)
-    g = tape.jacobian(output,w)
-    print(g)
-    g = tf.reshape(g,(10,g.shape[-1]*g.shape[-2]))
-    print(g)
-    g = tf.square(g)
-    print(g)
-    g = tf.reduce_sum(g)
-    print(g)
-
-
-    
-
-
-
-
-
-
-if __name__ == "__main__":
-    #main()
-    batch_FIM()

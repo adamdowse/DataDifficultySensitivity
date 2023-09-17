@@ -268,8 +268,8 @@ def build_CIFAR10(root_dir,preaugment_size=0):
     print(test_df.head())
 
     #save the metadata csv files
-    train_df.to_csv(os.path.join(root_dir,"trainmetadata.csv"))
-    test_df.to_csv(os.path.join(root_dir,"testmetadata.csv"))
+    train_df.to_csv(os.path.join(root_dir,"C_"+str(preaugment_size)+"trainmetadata.csv"))
+    test_df.to_csv(os.path.join(root_dir,"C_"+str(preaugment_size)+"testmetadata.csv"))
 
 
 if __name__ == "__main__":
