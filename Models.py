@@ -418,7 +418,7 @@ class Models():
     def epoch_init(self):
         #this is called at the start of each epoch
         #Reset the metrics at the start of the next epoch
-        self.train_loss_metric.reset_states()
+        #self.train_loss_metric.reset_states()
         self.train_acc_metric.reset_states()
         self.train_prec_metric.reset_states()
         self.train_rec_metric.reset_states()
@@ -458,21 +458,22 @@ class Models():
         print('--> time: ',time.time()-t)
         return loss_spectrum
 
-    def log_metrics(self,train_loss):
+    def log_metrics(self,train_loss,test_loss,epoch_num,adjusted_epoch):
         wandb.log({'train_loss':train_loss,
                    'train_acc':self.train_acc_metric.result(),
                    'train_prec':self.train_prec_metric.result(),
                    'train_rec':self.train_rec_metric.result(),
-                   'test_loss':self.test_loss_metric.result(),
+                   'test_loss':test_loss,
                    'test_acc':self.test_acc_metric.result(),
                    'max_test_acc':self.max_acc,
                    'test_prec':self.test_prec_metric.result(),
                    'test_rec':self.test_rec_metric.result(),
                    'lr':self.model.optimizer.learning_rate.numpy(),
-                   "adjusted_epoch":self.epoch_num_adjusted},
-                   step=self.epoch_num)
+                   "adjusted_epoch":adjusted_epoch},
+                   step=epoch_num)
 
-    def calc_dist_FIM(self,ds,num_batches):
+    def calc_dist_FIM(self,ds,num_batches,FIM_BS):
+        self.FIM_BS = FIM_BS
         #this needs to define the FIM
         #calc fim diag
         print('FIM: Calculating FIM')
@@ -481,41 +482,45 @@ class Models():
         data_count = 0
         lower_lim = np.min([self.config.record_FIM_n_data_points,num_batches*self.config.batch_size])
         lower_lim = int(lower_lim/self.config.batch_size) #number of batches to use
+
         data_count = 0
-        
         s = 0
         iter_ds = iter(ds)
         for _ in range(lower_lim):
-            s += self.distributed_FIM_step(iter(iter_ds))#send a batch to each replica
-            data_count += replica_count*self.config.batch_size
+            s += self.distributed_FIM_step(next(iter_ds))#send a batch to each replica
+            data_count += self.FIM_BS
         mean = s/data_count
         print('--> time: ',time.time()-t)
         return mean
 
+    @tf.function
     def distributed_FIM_step(self,items):#should be a batch of size 1
-        imgs,_ = items
-        replica_grads = self.strategy.run(self.Get_Z,args=(imgs,)) #this should return a list of grads for each replica
+        replica_grads = self.strategy.run(self.Get_Z,args=(items,)) #this should return a list of grads for each replica
         return self.strategy.reduce(tf.distribute.ReduceOp.SUM, replica_grads,axis=None) #sum the grads over all replicas
 
     @tf.function
-    def Get_Z(self,imgs):
+    def Get_Z(self,items):
+        imgs,labels = items
         with tf.GradientTape() as tape:
             y_hat = self.model(imgs,training=False)
             selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1))
             output = tf.gather(y_hat,selected,axis=1,batch_dims=1)
             output = tf.math.log(output)
         g = tape.jacobian(output,self.model.trainable_variables)
-        g = tf.reshape(g,(10,g.shape[-1]*g.shape[-2]))
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables]
+        g = [tf.reshape(g[i],(self.FIM_BS,layer_sizes[i])) for i in range(len(g))]
+        g = tf.concat(g,axis=1)
         g = tf.square(g)
         g = tf.reduce_sum(g)
         return g #sum of all the grads in batch
 
 
     
-    def compute_loss(self,labels,preds):
+    def compute_loss(self,imgs,labels):
         with self.strategy.scope():
-            per_example_loss = self.loss_func(labels,preds)
-            loss = tf.nn.compute_average_loss(per_example_loss)
+            with tf.GradientTape() as tape:
+                preds = self.model(imgs,training=False)
+                loss = self.loss_func(labels,preds)
         return loss
 
     @tf.function
@@ -527,21 +532,23 @@ class Models():
             loss = tf.nn.compute_average_loss(per_example_loss)
         grads = tape.gradient(loss,self.model.trainable_variables,)
         self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
-        self.train_loss_metric.update_state(loss)
+        #self.train_loss_metric.update_state(loss)
         self.train_acc_metric.update_state(labels,preds)
         self.train_prec_metric.update_state(labels,preds)
         self.train_rec_metric.update_state(labels,preds)
         return loss
 
     @tf.function
-    def test_step(self,imgs,labels):
+    def test_step(self,items):
+        imgs,labels = items
         with tf.GradientTape() as tape:
             preds = self.model(imgs,training=False)
             loss = self.loss_func(labels,preds)
-        self.test_loss_metric.update_state(loss)
+            loss = tf.nn.compute_average_loss(loss)
         self.test_acc_metric.update_state(labels,preds)
         self.test_prec_metric.update_state(labels,preds)
         self.test_rec_metric.update_state(labels,preds)
+        self.test_loss_metric.update_state(loss)
 
     @tf.function
     def distributed_train_step(self,data_inputs): #imgsand labels are dist batches
@@ -549,8 +556,9 @@ class Models():
         return self.strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses,axis=None)
     
     @tf.function
-    def distributed_test_step(self,imgs,labels):
-        return self.strategy.run(self.test_step,args=(imgs,labels))
+    def distributed_test_step(self,data_inputs):
+        per_replica_losses = self.strategy.run(self.train_step,args=(data_inputs,))#run the train step on each replica
+        return self.strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses,axis=None)
 
     @tf.function
     def norm_train_step(self,imgs,labels):

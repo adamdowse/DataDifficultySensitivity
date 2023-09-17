@@ -73,13 +73,13 @@ def Main(config):
     tf.keras.backend.clear_session()
     strategy = tf.distribute.MirroredStrategy()
     print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
-    #wandb.init(project='DataDiffSens',config=config.__dict__)
+    wandb.init(project='DataDiffSens',config=config.__dict__)
     #dataset = DataHandler.DataHandler(config)
     data_obj = DataHandler.Data(strategy,config.ds_root,config.preaugment,config.img_size)
     test_data_obj = DataHandler.Data(strategy,config.ds_root,config.preaugment,config.img_size)
     test_ds, test_num_batches = test_data_obj.init_data(config.batch_size,train=False,distributed=True,shuffle=False)
     with strategy.scope():
-        model = Models.Models(config,data_obj.num_classes)
+        model = Models.Models(config,data_obj.num_classes,strategy)
 
     epoch_updated = False
 
@@ -87,7 +87,7 @@ def Main(config):
     epoch_num = 0 #this is the epoch number
     adjusted_epoch_num = 0 #this is the epoch number acounting for percentage epochs
     while epoch_num <= config.epochs and not model.early_stop(adjusted_epoch_num):
-        print("Epoch: ",model.epoch_num,"Batch: ",model.batch_num)
+        print("Epoch: ",model.epoch_num,"Batch: ",model.batch_num)#TODO FIX
 
         #data setup
         print("Data Setup")
@@ -97,7 +97,7 @@ def Main(config):
         if update:
             data_obj.get_losses(model,config.batch_size)
         data_obj.reduce_data(method,[config.method_param])
-        ds, num_batches = data_obj.init_data(config.batch_size,train=True,distributed=True,shuffle=True)
+        ds, num_batches = data_obj.init_data(config.batch_size,train=True,distributed=False,shuffle=True)
         model.epoch_init()
         print("Data and model Setup Time: ",time.time()-t)
 
@@ -107,7 +107,10 @@ def Main(config):
         total_loss = 0
         batch_count = 0
         ds_iter = iter(ds)
-        for _ in num_batches:
+        print("Number of batches: ",num_batches)
+        for _ in range(num_batches):
+            if batch_count%50 == 0:
+                print("Batch: ",batch_count)
             total_loss += model.distributed_train_step(next(ds_iter))
             batch_count += 1
         train_loss = total_loss/num_batches
@@ -116,42 +119,52 @@ def Main(config):
         #Testing
         print("Testing")
         t = time.time()
-        model.test_results = model.model.evaluate(test_ds)
+        test_ds_iter = iter(test_ds)
+        print("Number of batches: ",test_num_batches)
+        batch_count = 0
+        for _ in range(test_num_batches):
+            if batch_count%50 == 0:
+                print("Batch: ",batch_count)
+            total_loss += model.distributed_test_step(next(test_ds_iter))
+            batch_count += 1
+        test_loss = total_loss/test_num_batches
         print("Testing Time: ",time.time()-t)
 
         #does the next epoch need loss updates
         if check_if_update_for_next_epoch(config.method_index,adjusted_epoch_num):
             epoch_updated = True
-            data_obj.get_losses(model,config.batch_size)
+            data_obj.get_loss(model,config.batch_size)
         else:
             epoch_updated = False
         
+        FIM_BS = 10
 
         #Record FIM
         if config.record_FIM:
-            data_obj.update_mask(method='all')
-            ds,num_batches = data_obj.init_data(config.batch_size,train=True,distributed=True,shuffle=True)
-            FullFIM = model.calc_dist_FIM(ds,num_batches)
+            data_obj.reduce_data(method='all')
+            ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+            FullFIM = model.calc_dist_FIM(ds,num_batches,FIM_BS)
             wandb.log({'FullFIM':FullFIM},step=epoch_num)
         
         if config.record_highloss_FIM:
-            data_obj.update_mask(method='loss',params=[0.5,1])
-            ds,num_batches = data_obj.init_data(config.batch_size,train=True,distributed=True,shuffle=True)
-            HLFIM  = model.calc_dist_FIM(ds,num_batches)
+            data_obj.reduce_data(method='loss',params=[0.5,1])
+            ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+            HLFIM  = model.calc_dist_FIM(ds,num_batches,FIM_BS)
             wandb.log({'HLFIM':HLFIM},step=epoch_num)
 
         if config.record_lowloss_FIM:
-            data_obj.update_mask(method='loss',params=[0,0.5])
-            ds,num_batches = data_obj.init_data(config.batch_size,train=True,distributed=True,shuffle=True)
-            LLFIM  = model.calc_dist_FIM(ds,num_batches)
+            data_obj.reduce_data(method='loss',params=[0,0.5])
+            ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+            LLFIM  = model.calc_dist_FIM(ds,num_batches,FIM_BS)
             wandb.log({'LLFIM':LLFIM},step=epoch_num)
         
         if config.record_staged_FIM:
             k = 8
             for i in range(k):
-                data_obj.update_mask(method='loss',params=[1/i,1/(i+1)])
-                ds,num_batches = data_obj.init_data(config.batch_size,train=True,distributed=True,shuffle=True)
-                StagedFIM = model.calc_dist_FIM(ds,num_batches)
+
+                data_obj.reduce_data(method='loss',params=[1*i/k,1*(i+1)/k])
+                ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+                StagedFIM = model.calc_dist_FIM(ds,num_batches,FIM_BS)
             
                 wandb.log({'StagedFIM_'+str(i):StagedFIM},step=epoch_num)
 
@@ -161,7 +174,7 @@ def Main(config):
             print("Loss Spectrum Not Implemented")
             
         #WandB logging
-        model.log_metrics(train_loss)
+        model.log_metrics(train_loss,test_loss,epoch_num,adjusted_epoch_num)
 
         #update counters
         #if the method is being applied then epoch is updated with the percentage used
@@ -186,11 +199,11 @@ if __name__ == "__main__":
     #/com.docker.devenvironments.code/datasets/
         def __init__(self,args=None):
             #Hyperparameters
-            self.batch_size = 16            #batch size
+            self.batch_size = 32            #batch size
             self.lr = 0.01                  #0.001 is adam preset in tf
             self.lr_decay_type = 'fixed'    #fixed, exp
             self.lr_decay_param = [0.1]     #defult adam = [eplioon = 1e-7] SGD exp= [decay steps, decay rate]
-            self.optimizer = 'Adam'         #Adam, SGD, RMSprop
+            self.optimizer = 'SGD'         #Adam, SGD, RMSprop
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0               #momentum for SGD  
 
@@ -201,8 +214,8 @@ if __name__ == "__main__":
             self.steps_per_epoch = 1000      #number of batches per epoch
 
             #Results
-            self.group = 'TestT5'
-            self.acc_sample_weight = [1,1,1,1,5,1,1] #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
+            self.group = 'TestCIFAR'
+            self.acc_sample_weight = None #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.record_FIM = False                 #record the full FIM    
             self.record_highloss_FIM = False        #record the FIM of the high loss samples
             self.record_lowloss_FIM = False         #record the FIM of the low loss samples
@@ -211,18 +224,19 @@ if __name__ == "__main__":
             self.record_loss_spectrum = False       #record the loss spectrum
             
             #Data
-            self.data = 'HAM10000'          #cifar10 HAM10000
-            self.img_size = (299,299,3)       #size of images (299,299) for IRv2
-            self.ds_root = '/com.docker.devenvironments.code/HAM10000/' #root path of dataset
+            self.data = 'cifar10'          #cifar10 HAM10000
+            self.img_size = (32,32,3)       #size of images (299,299) for IRv2
+            self.ds_root = '/com.docker.devenvironments.code/CIFAR10/' #root path of dataset
             self.data_percentage = 1        #1 is full dataset HAM not implemented
-            self.preaugment = 1000          #number of images to preaugment
+            self.preaugment = 0          #number of images to preaugment
             self.label_smoothing = 0        #0 is no smoothing
             self.misslabel = 0              #0 is no misslabel
 
             #Model
-            self.model_name = 'IRv2'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
+            self.model_name = 'TFCNN'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
             self.model_init_type = None #Not recomended
             self.model_init_seed = np.random.randint(0,100000)
+            self.weight_decay = 0      #0.0001 is default for adam
 
             #Method
             args.method_index = args.method_index.split(' ')    #inputed as 'start_epoch method start_epoch method ...'

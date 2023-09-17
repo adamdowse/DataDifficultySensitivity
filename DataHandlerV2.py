@@ -108,8 +108,8 @@ class Data():
         losses = np.array([])
         for i in range(num_batches):
             batch = next(iterator)
-            losses = np.append(losses,model.get_losses(batch[0],batch[1]))
-        self.losses = np.array([np.random.rand() for i in range(len(self.train_img_names))])
+            losses = np.append(losses,model.compute_loss(batch[0],batch[1]))
+        self.losses = losses
 
     #reduce the data to the number of images wanted by creating a mask to limited data used
     def reduce_data(self,method,params=None):
@@ -176,7 +176,12 @@ class Data():
         dataset = tf.data.Dataset.zip((x_dataset, y_dataset))
         dataset = dataset.batch(bs) #TODO is this to global batch size or per gpu batch size, needs testing
         if distributed:
-            dataset = self.strategy.experimental_distribute_dataset(dataset)
+            options = tf.distribute.InputOptions(
+                experimental_fetch_to_device=True,
+                experimental_place_dataset_on_device=True,
+                experimental_per_replica_buffer_size=10)
+            dataset = self.strategy.experimental_distribute_dataset(dataset, 
+                                                                    options=options)
         else:
             dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
