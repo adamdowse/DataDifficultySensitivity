@@ -34,6 +34,7 @@ class Data():
         #   -C_0 (example of dataset with 0 augmented images per class)(this is the original data)
 
         self.strategy = strategy
+        self.data_name = data_dir.split("/")[-1]
         self.data_dir = data_dir
         self.preaugment_size = preaugment_size
         self.img_size = img_size #[244,244,3]HAM [32,32,3]CIFAR10
@@ -102,6 +103,7 @@ class Data():
     def get_loss(self,model,bs=12):
         #get the loss of the data
         #build dataset
+        self.reduce_data(method='all')
         dataset, num_batches = self.init_data(bs,train=True,distributed=False,shuffle=False)
         #get the loss
         iterator = iter(dataset)
@@ -127,8 +129,32 @@ class Data():
             if params == None:
                 raise ValueError("Please specify the params as [lower percentage of data to use,upper percentage of data to use]")
             self.train_index_mask = np.array([False]*len(self.train_img_names))
+            print("Total ", len(self.train_index_mask))
+            print("percentages ", params)
+            print("len losses ", len(self.losses))
             true_loss_indexes = np.argsort(self.losses)[int(params[0]*len(self.train_index_mask)):int(params[1]*len(self.train_index_mask))]
             self.train_index_mask[true_loss_indexes] = True
+            print("Number of images used above loss threshold: ",len(true_loss_indexes))
+        elif method == "FIM":
+            #take the split of data between the params according to the FIM
+            if params == None:
+                raise ValueError("Please specify the params as boolean array of length num_classes")
+            params = params[0]
+            if params == "all":
+                self.train_index_mask = np.array([True]*len(self.train_img_names))
+                return
+            self.train_index_mask = np.array([False]*len(self.train_img_names)) #set all to false
+            true_loss_indexes = np.argsort(self.losses)                         #sort the losses and get the indexes
+            num_groups = len(params)                                            #get the number of groups
+            group_size = int(len(true_loss_indexes)/num_groups)                 #get the size of each group
+            included_indexes = []                                               #create a list to hold the indexes to include
+            for i in range(num_groups):
+                if params[i]:
+                    included_indexes.append(true_loss_indexes[i*group_size:(i+1)*group_size])
+            included_indexes = np.concatenate(included_indexes)
+            print("Number of images used above FIM threshold: ",len(included_indexes))
+            #true_loss_indexes = np.argsort(self.losses)[int(params[0]*len(self.train_index_mask)):int(params[1]*len(self.train_index_mask))]
+            self.train_index_mask[included_indexes] = True
 
         else:
             raise ValueError("Invalid method, please use 'all' or 'half'")
@@ -169,6 +195,8 @@ class Data():
             return img
         x_dataset = tf.data.Dataset.from_tensor_slices(img_names) #this will be the img names to use in training
         x_dataset = x_dataset.map(load_img, num_parallel_calls=tf.data.experimental.AUTOTUNE)#this is now imgs
+        if self.data_name == "HAM":
+            x_dataset = x_dataset.map(tf.keras.applications.inception_resnet_v2.preprocess_input, num_parallel_calls=tf.data.experimental.AUTOTUNE)#this is now preprocessed imgs
 
         y_dataset = tf.data.Dataset.from_tensor_slices(img_labels) #this will be the corrosponding labels
         y_dataset = y_dataset.map(lambda x: tf.one_hot(x,depth=self.num_classes), num_parallel_calls=tf.data.experimental.AUTOTUNE)#this is now one hot encoded labels

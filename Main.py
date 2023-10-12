@@ -28,6 +28,11 @@ def check_method_index(method_index,adjusted_epoch,epoch_updated):
                     return 'loss',False
                 else:
                     return 'loss',True
+            if method == 'AboveFIMThreshold':
+                if epoch_updated:
+                    return 'FIM',False
+                else:
+                    return 'FIM',True
             else:
                 ValueError("ERROR:Method not recognised")
     else:
@@ -45,6 +50,8 @@ def check_if_update_for_next_epoch(method_index,adjusted_epoch):
             if method == 'Vanilla':
                 update1 = False
             elif method == 'HighLossPercentage': #CAN ADD HERE FOR OTHER METHODS
+                update1 = True
+            elif method == 'AboveFIMThreshold': #CAN ADD HERE FOR OTHER METHODS
                 update1 = True
             else:
                 ValueError("ERROR:Method not recognised")
@@ -95,7 +102,16 @@ def Main(config):
         #update the loss of all train data if needed
         method,update = check_method_index(config.method_index,model.epoch_num_adjusted,epoch_updated)
         if update:
-            data_obj.get_losses(model,config.batch_size)
+            data_obj.get_loss(model,config.batch_size)
+        if epoch_num > 0 and method == 'FIM':
+            #use the data groups that are above the FIM threshold
+            FIM_threshold = 10
+            #create boolean array of the data groups that are above the threshold
+            config.method_param = np.array(staged_FIM_results) > FIM_threshold
+            
+        else:
+            config.method_param = "all"
+        print(config.method_param)
         data_obj.reduce_data(method,[config.method_param])
         ds, num_batches = data_obj.init_data(config.batch_size,train=True,distributed=False,shuffle=True)
         model.epoch_init()
@@ -122,6 +138,7 @@ def Main(config):
         test_ds_iter = iter(test_ds)
         print("Number of batches: ",test_num_batches)
         batch_count = 0
+        total_loss = 0
         for _ in range(test_num_batches):
             if batch_count%50 == 0:
                 print("Batch: ",batch_count)
@@ -160,13 +177,16 @@ def Main(config):
         
         if config.record_staged_FIM:
             k = 8
+            staged_FIM_results = np.array([0.0]*k)
             for i in range(k):
 
                 data_obj.reduce_data(method='loss',params=[1*i/k,1*(i+1)/k])
                 ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
                 StagedFIM = model.calc_dist_FIM(ds,num_batches,FIM_BS)
+                staged_FIM_results[i] = StagedFIM
             
                 wandb.log({'StagedFIM_'+str(i):StagedFIM},step=epoch_num)
+        
 
         #Record Loss Spectrum
         if config.record_loss_spectrum:
@@ -208,13 +228,13 @@ if __name__ == "__main__":
             self.momentum = 0               #momentum for SGD  
 
             #length of training
-            self.epochs = 15               #max number of epochs
+            self.epochs = 150               #max number of epochs
             self.early_stop = 150           #number of epochs below threshold before early stop
             self.early_stop_epoch = 150     #epoch to start early stop
             self.steps_per_epoch = 1000      #number of batches per epoch
 
             #Results
-            self.group = 'TestCIFAR'
+            self.group = 'TestAFIMT'
             self.acc_sample_weight = None #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.record_FIM = False                 #record the full FIM    
             self.record_highloss_FIM = False        #record the FIM of the high loss samples

@@ -1,7 +1,7 @@
 #This is a repository for the models used in the project 
 #it should also contain the hyperparameters for the runs
 
-from keras.src.utils import losses_utils
+
 import tensorflow as tf
 import wandb   
 from tensorflow import keras
@@ -367,6 +367,7 @@ class Models():
             self.output_is_logits = False
 
         elif self.config.model_name == "IRv2":
+            
             irv2 = tf.keras.applications.InceptionResNetV2(
                 include_top=True,
                 weights="imagenet",
@@ -423,7 +424,7 @@ class Models():
         self.train_prec_metric.reset_states()
         self.train_rec_metric.reset_states()
 
-        self.test_loss_metric.reset_states()
+        #self.test_loss_metric.reset_states()
         self.test_acc_metric.reset_states()
         self.test_prec_metric.reset_states()
         self.test_rec_metric.reset_states()
@@ -473,12 +474,13 @@ class Models():
                    step=epoch_num)
 
     def calc_dist_FIM(self,ds,num_batches,FIM_BS):
-        self.FIM_BS = FIM_BS
+        
         #this needs to define the FIM
         #calc fim diag
         print('FIM: Calculating FIM')
         t = time.time()
         replica_count = self.strategy.num_replicas_in_sync
+        self.FIM_BS = FIM_BS//replica_count
         data_count = 0
         lower_lim = np.min([self.config.record_FIM_n_data_points,num_batches*self.config.batch_size])
         lower_lim = int(lower_lim/self.config.batch_size) #number of batches to use
@@ -548,7 +550,8 @@ class Models():
         self.test_acc_metric.update_state(labels,preds)
         self.test_prec_metric.update_state(labels,preds)
         self.test_rec_metric.update_state(labels,preds)
-        self.test_loss_metric.update_state(loss)
+        #self.test_loss_metric.update_state(loss)
+        return loss
 
     @tf.function
     def distributed_train_step(self,data_inputs): #imgsand labels are dist batches
@@ -557,7 +560,7 @@ class Models():
     
     @tf.function
     def distributed_test_step(self,data_inputs):
-        per_replica_losses = self.strategy.run(self.train_step,args=(data_inputs,))#run the train step on each replica
+        per_replica_losses = self.strategy.run(self.test_step,args=(data_inputs,))#run the train step on each replica
         return self.strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses,axis=None)
 
     @tf.function
