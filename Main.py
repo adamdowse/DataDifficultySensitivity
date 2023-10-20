@@ -138,7 +138,9 @@ def Main(config):
         ds_iter = iter(ds)
         print("Number of batches: ",num_batches)
         for _ in range(num_batches):
-            if batch_count%2 == 0:
+            if batch_count%2 == 0 and config.record_step_FIM:
+                print("Batch: ",batch_count)
+            elif batch_count%100 == 0:
                 print("Batch: ",batch_count)
             total_loss += model.distributed_train_step(next(ds_iter))
             batch_count += 1
@@ -241,9 +243,9 @@ if __name__ == "__main__":
         def __init__(self,args=None):
             #Hyperparameters
             self.batch_size = 100            #batch size
-            self.lr = 0.01                  #0.001 is adam preset in tf
-            self.lr_decay_type = 'fixed'    #fixed, exp
-            self.lr_decay_param = [0.1]     #defult adam = [eplioon = 1e-7] SGD exp= [decay steps, decay rate]
+            self.lr = 0.1                #0.001 is adam preset in tf
+            self.lr_decay_type = 'exp'    #fixed, exp
+            self.lr_decay_param = [50,0.9]     #defult adam = [eplioon = 1e-7] SGD exp= [decay steps, decay rate]
             self.optimizer = 'SGD'         #Adam, SGD, RMSprop
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0               #momentum for SGD  
@@ -255,7 +257,7 @@ if __name__ == "__main__":
             self.steps_per_epoch = 1000      #number of batches per epoch
 
             #Results
-            self.group = 'T3ModFIMLr0.01'
+            self.group = 'T3ModFIMLr0.1_exp50_0.9'
             self.acc_sample_weight = None #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.record_FIM = False                 #record the full FIM    
             self.record_highloss_FIM = False        #record the FIM of the high loss samples
