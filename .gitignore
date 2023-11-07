@@ -5,4 +5,5 @@ wandb/*
 datasets/*
 HAM10000/*
 CIFAR10/*
+SVHN/*
 condor/*

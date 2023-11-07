@@ -156,6 +156,16 @@ class Data():
             #true_loss_indexes = np.argsort(self.losses)[int(params[0]*len(self.train_index_mask)):int(params[1]*len(self.train_index_mask))]
             self.train_index_mask[included_indexes] = True
 
+        elif method == "class":
+            #splits the data by class
+            if params == None:
+                raise ValueError("Please specify the class to use") 
+            class_name = params[0]
+            self.train_index_mask = np.array([False]*len(self.train_img_names)) 
+            img_labs = self.train_img_labels
+            self.train_index_mask[img_labs == class_name] = True
+            print("Number of images used in class: ",len(self.train_index_mask[self.train_index_mask]))
+
         else:
             raise ValueError("Invalid method, please use 'all' or 'half'")
 

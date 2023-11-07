@@ -271,6 +271,56 @@ def build_CIFAR10(root_dir,preaugment_size=0):
     train_df.to_csv(os.path.join(root_dir,"C_"+str(preaugment_size)+"trainmetadata.csv"))
     test_df.to_csv(os.path.join(root_dir,"C_"+str(preaugment_size)+"testmetadata.csv"))
 
+def build_SVHN(root_dir,preaugment_size=0):
+    #save the SVHN tfds dataset to the folder and create the metadata csv files
+    root_dir = os.path.join(root_dir,"SVHN")
+    data_dir = os.path.join(root_dir,"C_"+str(preaugment_size))
+    test_dir = os.path.join(root_dir,"data")
+    
+    #check if the augmented data exists
+    if os.path.exists(data_dir):
+        raise ValueError("The augmented data does exist, this does not need to be run")
+    
+    #build the data dir
+    os.mkdir(data_dir)
+
+    #create the metadata csv file
+    train_df = pd.DataFrame(columns=['image_id','label'])
+
+    #download the train dataset
+    svhn_ds, info = tfds.load('svhn_cropped',split=['train'],data_dir=root_dir,with_info=True,download=True,as_supervised=True,shuffle_files=False)
+    iterator = iter(svhn_ds)
+    class_names = info.features['label'].names
+    c = 0
+    for x,y in next(iterator):
+        name = str(class_names[y.numpy()])+'_'+str(c)
+        PIL.Image.fromarray(x.numpy()).save(os.path.join(data_dir,name +'.jpg'))
+        train_df.loc[c] = [name,class_names[y.numpy()]]
+        c += 1
+    print(train_df.head())
+
+    #create the test metadata csv file
+    test_df = pd.DataFrame(columns=['image_id','label'])
+
+    #create the test file dir
+    os.mkdir(test_dir)
+
+    #download the test dataset
+    svhn_ds, info = tfds.load('svhn_cropped',split=['test'],data_dir=root_dir,with_info=True,download=True,as_supervised=True,shuffle_files=False)
+    iterator = iter(svhn_ds)
+    class_names = info.features['label'].names
+    c = 0
+    for x,y in next(iterator):
+        name = str(class_names[y.numpy()])+'_'+str(c)
+        PIL.Image.fromarray(x.numpy()).save(os.path.join(test_dir,name +'.jpg'))
+        test_df.loc[c] = [name,class_names[y.numpy()]]
+        c += 1
+    print(test_df.head())
+
+    #save the metadata csv files
+    train_df.to_csv(os.path.join(root_dir,"C_"+str(preaugment_size)+"trainmetadata.csv"))
+    test_df.to_csv(os.path.join(root_dir,"C_"+str(preaugment_size)+"testmetadata.csv"))
+
 
 if __name__ == "__main__":
-    build_CIFAR10('/com.docker.devenvironments.code/',preaugment_size=0)
+    build_SVHN('/com.docker.devenvironments.code/',preaugment_size=0)

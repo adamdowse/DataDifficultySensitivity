@@ -473,22 +473,29 @@ class Models():
                    "adjusted_epoch":adjusted_epoch},
                    step=epoch_num)
 
-    def calc_dist_FIM(self,ds,num_batches,FIM_BS):
+    def calc_dist_FIM(self,ds,num_batches,FIM_BS,record_FIM_n_data_points=None):
         
         #this needs to define the FIM
         #calc fim diag
         print('FIM: Calculating FIM')
         t = time.time()
+        if record_FIM_n_data_points == None:
+            #this is the original system that ensures a minimum number of batches are used
+            record_FIM_n_data_points = self.config.record_FIM_n_data_points
+            lower_lim = np.min([record_FIM_n_data_points,num_batches*self.config.batch_size])
+            lower_lim = int(lower_lim/self.config.batch_size) #number of batches to use
+        else:
+            #This allows specifying of the number of data points to use
+            lower_lim = int(record_FIM_n_data_points/self.config.batch_size) #number of batches to use
         replica_count = self.strategy.num_replicas_in_sync
         self.FIM_BS = FIM_BS//replica_count
-        data_count = 0
-        lower_lim = np.min([self.config.record_FIM_n_data_points,num_batches*self.config.batch_size])
-        lower_lim = int(lower_lim/self.config.batch_size) #number of batches to use
-
+        
         data_count = 0
         s = 0
         iter_ds = iter(ds)
         for _ in range(lower_lim):
+            if data_count/FIM_BS % 100 == 0:
+                print(data_count)
             s += self.distributed_FIM_step(next(iter_ds))#send a batch to each replica
             data_count += self.FIM_BS
         mean = s/data_count
