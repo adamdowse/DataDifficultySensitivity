@@ -36,7 +36,7 @@ def Main(config):
     epoch_updated = False
 
     #FIM before training
-    for c in data_obj.class_names:
+    for c in range(data_obj.num_classes):
         data_obj.reduce_data(method='class',params=[c])
         ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
         classFIM = model.calc_dist_FIM(ds,num_batches,FIM_BS)
@@ -94,7 +94,7 @@ def Main(config):
 
 
         #Record FIM
-        for c in data_obj.class_names:
+        for c in range(data_obj.num_classes):
             data_obj.reduce_data(method='class',params=[c])
             ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
             classFIM = model.calc_dist_FIM(ds,num_batches,FIM_BS)
@@ -137,7 +137,7 @@ if __name__ == "__main__":
             self.steps_per_epoch = 1000      #number of batches per epoch
 
             #Results
-            self.group = 'T3_ClassGFIM'
+            self.group = 'T2_ClassGFIM'
             self.acc_sample_weight = None #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.record_FIM = False                 #record the full FIM    
             self.record_highloss_FIM = False        #record the FIM of the high loss samples
@@ -158,7 +158,7 @@ if __name__ == "__main__":
             self.misslabel = 0              #0 is no misslabel
 
             #Model
-            self.model_name = 'ResNetV1-14'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
+            self.model_name = 'ACLCNN'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
             self.model_init_type = None #Not recomended
             self.model_init_seed = np.random.randint(0,100000)
             self.weight_decay = 0      #0.0001 is default for adam

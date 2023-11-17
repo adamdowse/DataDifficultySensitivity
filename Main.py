@@ -102,13 +102,13 @@ def Main(config):
             step_stagedFIM = model.calc_dist_FIM(ds2,num_batches2,FIM_BS)
             wandb.log({'step_stagedFIM_'+str(i):step_stagedFIM},step=0)
     
-    else:
+    elif config.record_original_FIM:
         data_obj_2.reduce_data(method='all')
         ds2,num_batches2 = data_obj_2.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
         OGFIM = model.calc_dist_FIM(ds2,num_batches2,FIM_BS)
         wandb.log({'OriginalFIM':OGFIM},step=0)
     
-    pnt()
+
     
 
     #Training
@@ -251,22 +251,22 @@ if __name__ == "__main__":
     #/com.docker.devenvironments.code/datasets/
         def __init__(self,args=None):
             #Hyperparameters
-            self.batch_size = 10           #batch size
-            self.lr = 0.1                #0.001 is adam preset in tf
-            self.lr_decay_type = 'exp'    #fixed, exp
-            self.lr_decay_param = [50,0.9]     #defult adam = [eplioon = 1e-7] SGD exp= [decay steps, decay rate]
-            self.optimizer = 'SGD'         #Adam, SGD, RMSprop
+            self.batch_size = 32          #batch size
+            self.lr = 0.001                #0.001 is adam preset in tf
+            self.lr_decay_type = 'fixed'    #fixed, exp
+            self.lr_decay_param = [1e-7]     #defult adam = [eplioon = 1e-7] SGD exp= [decay steps, decay rate]
+            self.optimizer = 'Adam'         #Adam, SGD, RMSprop
             self.loss_func = 'categorical_crossentropy'
             self.momentum = 0               #momentum for SGD  
 
             #length of training
-            self.epochs = 0             #max number of epochs
+            self.epochs = 2             #max number of epochs
             self.early_stop = 150           #number of epochs below threshold before early stop
             self.early_stop_epoch = 150     #epoch to start early stop
             self.steps_per_epoch = 1000      #number of batches per epoch
 
             #Results
-            self.group = 'T1_init_SVHN'
+            self.group = 'T3_step_FIM' #group name for wandb
             self.acc_sample_weight = None #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.record_FIM = False                 #record the full FIM    
             self.record_highloss_FIM = False        #record the FIM of the high loss samples
@@ -274,20 +274,20 @@ if __name__ == "__main__":
             self.record_staged_FIM = False          #record the FIM of the staged loss samples
             self.record_FIM_n_data_points = 5000    #number of data points to use for FIM
             self.record_loss_spectrum = False       #record the loss spectrum
-            self.record_original_FIM = True         #record the FIM before any training is done
-            self.record_step_FIM = False             #record the FIM after each step
+            self.record_original_FIM = False         #record the FIM before any training is done
+            self.record_step_FIM = True             #record the FIM after each step
             
             #Data
-            self.data = 'SVHN'          #cifar10 HAM10000 SVHN
+            self.data = 'cifar10'          #cifar10 HAM10000 SVHN
             self.img_size = (32,32,3)       #size of images (299,299) for IRv2
-            self.ds_root = '/com.docker.devenvironments.code/SVHN/' #root path of dataset
+            self.ds_root = '/com.docker.devenvironments.code/CIFAR10/' #root path of dataset
             self.data_percentage = 1        #1 is full dataset HAM not implemented
             self.preaugment = 0         #number of images to preaugment
             self.label_smoothing = 0        #0 is no smoothing
             self.misslabel = 0              #0 is no misslabel
 
             #Model
-            self.model_name = 'ResNetV1-14'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
+            self.model_name = 'TFCNN'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
             self.model_init_type = None #Not recomended
             self.model_init_seed = np.random.randint(0,100000)
             self.weight_decay = 0      #0.0001 is default for adam

@@ -160,10 +160,11 @@ class Data():
             #splits the data by class
             if params == None:
                 raise ValueError("Please specify the class to use") 
-            class_name = params[0]
+            class_num = params[0]
             self.train_index_mask = np.array([False]*len(self.train_img_names)) 
-            img_labs = self.train_img_labels
-            self.train_index_mask[img_labs == class_name] = True
+            img_labs = self.train_img_labels # [0,4,8,2,3,...]
+            img_labs = [True if i == class_num else False for i in img_labs]
+            self.train_index_mask = np.array(img_labs)
             print("Number of images used in class: ",len(self.train_index_mask[self.train_index_mask]))
 
         else:
