@@ -30,6 +30,7 @@ class Models():
         self.lr_schedule(0,True)
         self.max_acc = 0
         self.early_stop_count = 0
+        self.pre_process_func = None
         
     def optimizer_init(self):
         print('INIT: Optimizer: ',self.config.optimizer)
@@ -373,13 +374,76 @@ class Models():
                 tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
             ])
             self.output_is_logits = False
+        elif self.config.model_name == "CNN4":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+        elif self.config.model_name == "CNN5":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+        elif self.config.model_name == "CNN6":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+        elif self.config.model_name == "CNN7":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
         elif self.config.model_name == "ResNet18":
             #build resnet18 model
             inputs = keras.Input(shape=self.img_shape)
             outputs = build_resnet(inputs,[2,2,2,2],self.num_classes,self.config.weight_decay)
             self.model = keras.Model(inputs, outputs)
             self.output_is_logits = False
-        
         elif self.config.model_name == "ResNetV1-14":
             #https://www.kaggle.com/code/filippokevin/cifar-10-resnet-14/notebook
             inputs = keras.Input(shape=self.img_shape)
@@ -409,7 +473,6 @@ class Models():
             dense2 = tf.keras.layers.Dense(self.num_classes,activation='softmax')(dense1)#maxp
             self.model = tf.keras.models.Model(inputs=inputs,outputs=dense2)
             self.output_is_logits = False
-
         elif self.config.model_name == "TFCNN":
             self.model = tf.keras.Sequential([
                 tf.keras.layers.Conv2D(32,(3,3),activation='relu',input_shape=self.img_shape),
@@ -445,7 +508,6 @@ class Models():
                 tf.keras.layers.Dropout(0.5),
                 tf.keras.layers.Dense(self.num_classes,activation='softmax')])
             self.output_is_logits = False
-
         elif self.config.model_name == "IRv2":
             
             irv2 = tf.keras.applications.InceptionResNetV2(
@@ -496,14 +558,142 @@ class Models():
             output = tf.keras.layers.Dense(self.num_classes, activation='softmax')(output)
             self.model = tf.keras.models.Model(inputs=irv2.input, outputs=output)
             self.output_is_logits = False
-
         elif self.config.model_name == "VIT":
             self.model = build_VIT()
             self.output_is_logits = False
+        elif self.config.model_name == "VGG16":
+            self.model = tf.keras.applications.VGG16(
+                include_top = True,
+                weights = None,
+                input_shape = (244,244,3),
+                classes = self.num_classes,
+                classifier_activation = 'softmax'
+            )
+            self.output_is_logits = False
+            def vgg16_preprocess_input(x):
+                #scale to 244x244
+                x = tf.image.resize(x,[244,244])
+                return tf.keras.applications.vgg16.preprocess_input(x)
+            self.pre_process_func = vgg16_preprocess_input
+        elif self.config.model_name == "VGG19":
+            self.model = tf.keras.applications.VGG19(
+                include_top = True,
+                weights = None,
+                input_shape = (244,244,3),
+                classes = self.num_classes,
+                classifier_activation = 'softmax'
+            )
+            self.output_is_logits = False
+            def vgg19_preprocess_input(x):
+                #scale to 244x244
+                x = tf.image.resize(x,[244,244])
+                return tf.keras.applications.vgg19.preprocess_input(x)
+            self.pre_process_func = vgg19_preprocess_input
+        elif self.config.model_name == "ResNet50":
+            self.model = tf.keras.applications.ResNet50(
+                include_top = True,
+                weights = None,
+                input_shape = (244,244,3),
+                classes = self.num_classes,
+                classifier_activation = 'softmax'
+            )
+            self.output_is_logits = False
+            def resnet_preprocess_input(x):
+                #scale to 244x244
+                x = tf.image.resize(x,[244,244])
+                return tf.keras.applications.resnet.preprocess_input(x)
+            self.pre_process_func = resnet_preprocess_input
+        elif self.config.model_name == "ResNet101":
+            self.model = tf.keras.applications.ResNet101(
+                include_top = True,
+                weights = None,
+                input_shape = (244,244,3),
+                classes = self.num_classes,
+                classifier_activation = 'softmax'
+            )
+            self.output_is_logits = False
+            def resnet_preprocess_input(x):
+                #scale to 244x244
+                x = tf.image.resize(x,[244,244])
+                return tf.keras.applications.resnet.preprocess_input(x)
+            self.pre_process_func = resnet_preprocess_input
+        elif self.config.model_name == "ResNet152":
+            self.model = tf.keras.applications.ResNet152(
+                include_top = True,
+                weights = None,
+                input_shape = (244,244,3),
+                classes = self.num_classes,
+                classifier_activation = 'softmax'
+            )
+            self.output_is_logits = False
+            def resnet_preprocess_input(x):
+                #scale to 244x244
+                x = tf.image.resize(x,[244,244])
+                return tf.keras.applications.resnet.preprocess_input(x)
+            self.pre_process_func = resnet_preprocess_input
+        elif self.config.model_name == "InceptionV3":
+            self.model = tf.keras.applications.InceptionV3(
+                include_top = True,
+                weights = None,
+                input_shape = (299,299,3),
+                classes = self.num_classes,
+                classifier_activation = 'softmax'
+            )
+            self.output_is_logits = False
+            def inception_preprocess_input(x):
+                #scale to 299x299
+                x = tf.image.resize(x,[299,299])
+                return tf.keras.applications.inception_v3.preprocess_input(x)
+            self.pre_process_func = inception_preprocess_input
+        elif self.config.model_name == "MobileNetV2":
+            self.model = tf.keras.applications.MobileNetV2(
+                include_top = True,
+                weights = None,
+                alpha = 1.0,
+                input_shape = (224,224,3),
+                classes = self.num_classes,
+                classifier_activation = 'softmax'
+            )
+            self.output_is_logits = False
+            def mobilenet_preprocess_input(x):
+                #scale to 224x224
+                x = tf.keras.applications.mobilenet_v2.preprocess_input(x)
+                return tf.image.resize(x,[224,224])
+            self.pre_process_func = mobilenet_preprocess_input
+            self.new_img_size = (224,224,3)
+
+        elif self.config.model_name == "EfficientNetB0":
+            self.model = tf.keras.applications.EfficientNetB0(
+                include_top = True,
+                weights = None,
+                input_shape = (32,32,3),
+                classes = self.num_classes,
+                classifier_activation = 'softmax'
+            )
+            self.output_is_logits = False
+            def efficientnet_preprocess_input(x):
+                #scale to 32x32
+                x = tf.image.resize(x,[32,32])
+                return tf.keras.applications.efficientnet.preprocess_input(x)
+            self.pre_process_func = efficientnet_preprocess_input
+        elif self.config.model_name == "EfficientNetB1":
+            self.model = tf.keras.applications.EfficientNetB1(
+                include_top = True,
+                weights = None,
+                input_shape = (32,32,3),
+                classes = self.num_classes,
+                classifier_activation = 'softmax'
+            )
+            self.output_is_logits = False
+            def efficientnet_preprocess_input(x):
+                #scale to 32x32
+                x = tf.image.resize(x,[32,32])
+                return tf.keras.applications.efficientnet.preprocess_input(x)
+            self.pre_process_func = efficientnet_preprocess_input
         else:
             print('Model not recognised')
 
-        self.model.build(input_shape=self.img_shape + (1,))
+        self.model.build(input_shape=self.new_img_size + (1,))
 
     def model_compile(self):
         self.model.summary()

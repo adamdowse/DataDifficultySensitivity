@@ -173,7 +173,7 @@ class Data():
             raise ValueError("Invalid method, please use 'all' or 'half'")
 
     #take the data to be used in next epoch and create the tf.data datasets that can be distributed
-    def init_data(self,bs,train=True,distributed=True,shuffle=True):
+    def init_data(self,bs,model,train=True,distributed=True,shuffle=True):
         #take the data to be used in next epoch and create the data
         if train:
             file_path = self.train_data_dir
@@ -204,12 +204,16 @@ class Data():
             img = tf.io.read_file(str(file_path)+"/"+img_name+".jpg")
             img = tf.image.decode_jpeg(img, channels=self.img_size[-1])
             img = tf.image.convert_image_dtype(img, tf.float32)
-            img = tf.image.resize(img, self.img_size[:-1])
+            #img = tf.image.resize(img, self.img_size[:-1])
+            if model.pre_process_func != None:
+                img = model.pre_process_func(img)
+            print("img shape ",img.shape)
             return img
         x_dataset = tf.data.Dataset.from_tensor_slices(img_names) #this will be the img names to use in training
         x_dataset = x_dataset.map(load_img, num_parallel_calls=tf.data.experimental.AUTOTUNE)#this is now imgs
-        if self.data_name == "HAM":
-            x_dataset = x_dataset.map(tf.keras.applications.inception_resnet_v2.preprocess_input, num_parallel_calls=tf.data.experimental.AUTOTUNE)#this is now preprocessed imgs
+        #if self.data_name == "HAM":
+        #    x_dataset = x_dataset.map(tf.keras.applications.inception_resnet_v2.preprocess_input, num_parallel_calls=tf.data.experimental.AUTOTUNE)#this is now preprocessed imgs
+        
 
         y_dataset = tf.data.Dataset.from_tensor_slices(img_labels) #this will be the corrosponding labels
         y_dataset = y_dataset.map(lambda x: tf.one_hot(x,depth=self.num_classes), num_parallel_calls=tf.data.experimental.AUTOTUNE)#this is now one hot encoded labels

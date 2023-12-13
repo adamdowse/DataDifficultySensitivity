@@ -85,10 +85,12 @@ def Main(config):
     data_obj = DataHandler.Data(strategy,config.ds_root,config.preaugment,config.img_size)
     data_obj_2 = DataHandler.Data(strategy,config.ds_root,config.preaugment,config.img_size)
     test_data_obj = DataHandler.Data(strategy,config.ds_root,config.preaugment,config.img_size)
-    test_ds, test_num_batches = test_data_obj.init_data(config.batch_size,train=False,distributed=True,shuffle=False)
+    
     with strategy.scope():
         model = Models.Models(config,data_obj.num_classes,strategy)
     
+    test_ds, test_num_batches = test_data_obj.init_data(config.batch_size,model,train=False,distributed=True,shuffle=False)
+
     FIM_BS = 12
     get_loss_BS = 12
 
@@ -99,13 +101,13 @@ def Main(config):
         k = 8
         for i in range(k):
             data_obj_2.reduce_data(method='loss',params=[1*i/k,1*(i+1)/k])
-            ds2,num_batches2 = data_obj_2.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+            ds2,num_batches2 = data_obj_2.init_data(FIM_BS,model,train=True,distributed=True,shuffle=True)
             step_stagedFIM = model.calc_dist_FIM(ds2,num_batches2,FIM_BS)
             wandb.log({'step_stagedFIM_'+str(i):step_stagedFIM},step=0)
     
     elif config.record_original_FIM:
         data_obj_2.reduce_data(method='all')
-        ds2,num_batches2 = data_obj_2.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+        ds2,num_batches2 = data_obj_2.init_data(FIM_BS,model,train=True,distributed=True,shuffle=True)
         OGFIM = model.calc_dist_FIM(ds2,num_batches2,FIM_BS)
         wandb.log({'OriginalFIM':OGFIM},step=0)
     
@@ -115,7 +117,7 @@ def Main(config):
     #Training
     epoch_num = 0 #this is the epoch number
     adjusted_epoch_num = 0 #this is the epoch number acounting for percentage epochs
-    while epoch_num <= config.epochs and not model.early_stop(adjusted_epoch_num):
+    while (epoch_num <= config.epochs and not model.early_stop(adjusted_epoch_num)) and config.epochs != 0:
         print("Epoch: ",model.epoch_num,"Batch: ",model.batch_num)
 
         #data setup
@@ -135,7 +137,7 @@ def Main(config):
             config.method_param = "all"
         print(config.method_param)
         data_obj.reduce_data(method,[config.method_param])
-        ds, num_batches = data_obj.init_data(config.batch_size,train=True,distributed=False,shuffle=True)
+        ds, num_batches = data_obj.init_data(config.batch_size,model,train=True,distributed=False,shuffle=True)
         model.epoch_init()
         print("Data and model Setup Time: ",time.time()-t)
 
@@ -166,7 +168,7 @@ def Main(config):
                     data_obj_2.reduce_data(method='loss',params=[1*i/k,1*(i+1)/k])
                     print("Reduce Time",time.time()-t)
                     t = time.time()
-                    ds2,num_batches2 = data_obj_2.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+                    ds2,num_batches2 = data_obj_2.init_data(FIM_BS,model,train=True,distributed=True,shuffle=True)
                     print("Init Time",time.time()-t)
                     t = time.time()
                     step_stagedFIM = model.calc_dist_FIM(ds2,num_batches2,FIM_BS)
@@ -202,19 +204,19 @@ def Main(config):
         #Record FIM
         if config.record_FIM:
             data_obj.reduce_data(method='all')
-            ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+            ds,num_batches = data_obj.init_data(FIM_BS,model,train=True,distributed=True,shuffle=True)
             FullFIM = model.calc_dist_FIM(ds,num_batches,FIM_BS)
             wandb.log({'FullFIM':FullFIM},step=epoch_num)
         
         if config.record_highloss_FIM:
             data_obj.reduce_data(method='loss',params=[0.5,1])
-            ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+            ds,num_batches = data_obj.init_data(FIM_BS,model,train=True,distributed=True,shuffle=True)
             HLFIM  = model.calc_dist_FIM(ds,num_batches,FIM_BS)
             wandb.log({'HLFIM':HLFIM},step=epoch_num)
 
         if config.record_lowloss_FIM:
             data_obj.reduce_data(method='loss',params=[0,0.5])
-            ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+            ds,num_batches = data_obj.init_data(FIM_BS,model,train=True,distributed=True,shuffle=True)
             LLFIM  = model.calc_dist_FIM(ds,num_batches,FIM_BS)
             wandb.log({'LLFIM':LLFIM},step=epoch_num)
         
@@ -224,7 +226,7 @@ def Main(config):
             for i in range(k):
 
                 data_obj.reduce_data(method='loss',params=[1*i/k,1*(i+1)/k])
-                ds,num_batches = data_obj.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+                ds,num_batches = data_obj.init_data(FIM_BS,model,train=True,distributed=True,shuffle=True)
                 StagedFIM = model.calc_dist_FIM(ds,num_batches,FIM_BS)
                 staged_FIM_results[i] = StagedFIM
             
@@ -271,34 +273,34 @@ if __name__ == "__main__":
             self.momentum = 0               #momentum for SGD  
 
             #length of training
-            self.epochs = 1             #max number of epochs
+            self.epochs = 0             #max number of epochs zero skips training
             self.early_stop = 150           #number of epochs below threshold before early stop
             self.early_stop_epoch = 150     #epoch to start early stop
             self.steps_per_epoch = 1000      #number of batches per epoch
 
             #Results
-            self.group = 'T7_001_step_FIM' #group name for wandb
+            self.group = 'InitFIMs' #group name for wandb
             self.acc_sample_weight = None #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.record_FIM = False                 #record the full FIM    
             self.record_highloss_FIM = False        #record the FIM of the high loss samples
             self.record_lowloss_FIM = False         #record the FIM of the low loss samples
             self.record_staged_FIM = False          #record the FIM of the staged loss samples
-            self.record_FIM_n_data_points = 2500    #number of data points to use for FIM
+            self.record_FIM_n_data_points = 5000    #number of data points to use for FIM
             self.record_loss_spectrum = False       #record the loss spectrum
-            self.record_original_FIM = False         #record the FIM before any training is done
-            self.record_step_FIM = True             #record the FIM after each step
+            self.record_original_FIM = True        #record the FIM before any training is done
+            self.record_step_FIM = False             #record the FIM after each step
             
             #Data
             self.data = 'cifar10'          #cifar10 HAM10000 SVHN
             self.img_size = (32,32,3)       #size of images (299,299) for IRv2, (32,32,3) cifar
-            self.ds_root = '/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/CIFAR10' #root path of dataset
+            self.ds_root = '/com.docker.devenvironments.code/datasets/CIFAR10' #root path of dataset /vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/CIFAR10
             self.data_percentage = 1        #1 is full dataset HAM not implemented
             self.preaugment = 0         #number of images to preaugment
             self.label_smoothing = 0        #0 is no smoothing
             self.misslabel = 0              #0 is no misslabel
 
             #Model
-            self.model_name = 'VIT'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2_pre(has ImageNet weights), IRv2
+            self.model_name = 'MobileNetV2'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2_pre(has ImageNet weights), IRv2
             self.model_init_type = None #Not recomended
             self.model_init_seed = np.random.randint(0,100000)
             self.weight_decay = 0.0001      #0.0001 is default for adam

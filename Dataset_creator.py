@@ -324,4 +324,5 @@ def build_SVHN(root_dir,preaugment_size=0):
 
 
 if __name__ == "__main__":
-    build_HAM('/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets',preaugment_size=8000)
+    build_CIFAR10('/com.docker.devenvironments.code/datasets',preaugment_size=0)
+    #/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets
