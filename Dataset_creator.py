@@ -10,9 +10,10 @@ import tensorflow_datasets as tfds
 import PIL
 
 
+
 #build and save the img dataset in the correct format
 def build_HAM(root_dir,preaugment_size=1000):
-    root_dir = os.path.join(data_dir,"HAM10000")
+    root_dir = os.path.join(root_dir,"HAM10000")
     meta_data_dir = os.path.join(root_dir,"HAM10000_metadata.csv")
     data_dir = os.path.join(root_dir,"data")
 
@@ -323,4 +324,4 @@ def build_SVHN(root_dir,preaugment_size=0):
 
 
 if __name__ == "__main__":
-    build_SVHN('/com.docker.devenvironments.code/',preaugment_size=0)
+    build_HAM('/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets',preaugment_size=8000)

@@ -1,0 +1,28 @@
+universe = docker
+docker_image = container-registry.surrey.ac.uk/shared-containers/ad00878:SHA_ad0e74ca
+#ad00878:SHA_7c5920db
+
+executable = /usr/bin/python3
+arguments = $ENV(PWD)/Main.py
+#--method_index $(A) --percent $(P)
+
+should_transfer_files = YES
+environment = "mount=$ENV(PWD),/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878"
+
+log = $ENV(PWD)/condor/c$(cluster).p$(process).log
+output = $ENV(PWD)/condor/c$(cluster).p$(process).out
+error = $ENV(PWD)/condor/c$(cluster).p$(process).error
+
++CanCheckpoint = False
++JobRunTime = 5
+
+requirements = (HasStornext == true) && (machine != "bifur.eps.surrey.ac.uk") && (machine != "bofur.eps.surrey.ac.uk")
+
+request_GPUs = 2
++GPUMem = 16000
+request_CPUs = 4
+request_memory = 16000
+
+#P = 0.5
+#A = '0 HighLossPercentage 2 Vanilla'
+queue 1

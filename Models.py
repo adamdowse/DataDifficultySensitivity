@@ -10,7 +10,7 @@ import math
 import time
 import numpy as np
 
-
+#CHANGED MOST TO TF.KERAS MIGHT NEED TO CHANGE BACK TO WORK
 
 class Models():
     def __init__(self,config,num_classes,strategy):
@@ -74,7 +74,7 @@ class Models():
                         # Calculate the loss between y_pred and y_true
                         loss = tf.keras.losses.categorical_crossentropy(y_true, y_pred, from_logits= self.from_logits,label_smoothing=self.label_smoothing)
                         # Make class_weights broadcastable and multiply them with the losses
-                        class_weights = tf.broadcast_to(self.class_weights, tf.shape(loss))
+                        class_weights = tf.broadcast_to(self.class_weights, [tf.shape(loss)[0],tf.shape(self.class_weights)[0]])
                         # Calculate the weight vector shape (batch_size,num_classes) * (batch_size, num_classes) = (batch_size, num_classes)
                         weights = tf.reduce_sum(y_true * class_weights, axis=1)
                         # Apply the weights to the loss
@@ -115,25 +115,25 @@ class Models():
             kaiming_normal = keras.initializers.VarianceScaling(scale=2.0, mode='fan_out', distribution='untruncated_normal')
 
             def conv3x3(x, out_planes, stride=1, name=None):
-                x = layers.ZeroPadding2D(padding=1, name=f'{name}_pad')(x)
-                return layers.Conv2D(filters=out_planes, kernel_size=3, strides=stride, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name=name)(x)
+                x = tf.keras.layers.ZeroPadding2D(padding=1, name=f'{name}_pad')(x)
+                return tf.keras.layers.Conv2D(filters=out_planes, kernel_size=3, strides=stride, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name=name)(x)
 
             def basic_block(x, planes, stride=1, downsample=None, name=None):
                 identity = x
 
                 out = conv3x3(x, planes, stride=stride, name=f'{name}.conv1')
-                out = layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.bn1')(out)
-                out = layers.ReLU(name=f'{name}.relu1')(out)
+                out = tf.keras.layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.bn1')(out)
+                out = tf.keras.layers.ReLU(name=f'{name}.relu1')(out)
 
                 out = conv3x3(out, planes, name=f'{name}.conv2')
-                out = layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.bn2')(out)
+                out = tf.keras.layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.bn2')(out)
 
                 if downsample is not None:
                     for layer in downsample:
                         identity = layer(identity)
 
-                out = layers.Add(name=f'{name}.add')([identity, out])
-                out = layers.ReLU(name=f'{name}.relu2')(out)
+                out = tf.keras.layers.Add(name=f'{name}.add')([identity, out])
+                out = tf.keras.layers.ReLU(name=f'{name}.relu2')(out)
 
                 return out
 
@@ -142,8 +142,8 @@ class Models():
                 inplanes = x.shape[3]
                 if stride != 1 or inplanes != planes:
                     downsample = [
-                        layers.Conv2D(filters=planes, kernel_size=1, strides=stride, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name=f'{name}.0.downsample.0'),
-                        layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.0.downsample.1'),
+                        tf.keras.layers.Conv2D(filters=planes, kernel_size=1, strides=stride, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name=f'{name}.0.downsample.0'),
+                        tf.keras.layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.0.downsample.1'),
                     ]
 
                 x = basic_block(x, planes, stride, downsample, name=f'{name}.0')
@@ -153,12 +153,12 @@ class Models():
                 return x
 
             def resnet(x, blocks_per_layer, num_classes):
-                x = layers.ZeroPadding2D(padding=3, name='conv1_pad')(x)
-                x = layers.Conv2D(filters=64, kernel_size=7, strides=2, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name='conv1')(x)
-                x = layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name='bn1')(x)
-                x = layers.ReLU(name='relu1')(x)
-                x = layers.ZeroPadding2D(padding=1, name='maxpool_pad')(x)
-                x = layers.MaxPool2D(pool_size=3, strides=2, name='maxpool')(x)
+                x = tf.keras.layers.ZeroPadding2D(padding=3, name='conv1_pad')(x)
+                x = tf.keras.layers.Conv2D(filters=64, kernel_size=7, strides=2, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name='conv1')(x)
+                x = tf.keras.layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name='bn1')(x)
+                x = tf.keras.layers.ReLU(name='relu1')(x)
+                x = tf.keras.layers.ZeroPadding2D(padding=1, name='maxpool_pad')(x)
+                x = tf.keras.layers.MaxPool2D(pool_size=3, strides=2, name='maxpool')(x)
 
                 x = make_layer(x, 64, blocks_per_layer[0], name='layer1')
                 x = make_layer(x, 128, blocks_per_layer[1], stride=2, name='layer2')
@@ -167,14 +167,14 @@ class Models():
 
                 
 
-                x = layers.GlobalAveragePooling2D(name='avgpool')(x)
-                initializer = keras.initializers.RandomUniform(-1.0 / math.sqrt(512), 1.0 / math.sqrt(512))
-                x = layers.Dense(units=num_classes, kernel_initializer=initializer, bias_initializer=initializer, name='fc')(x)
-                x = layers.Softmax(name='softmax')(x)
+                x = tf.keras.layers.GlobalAveragePooling2D(name='avgpool')(x)
+                initializer = tf.keras.initializers.RandomUniform(-1.0 / math.sqrt(512), 1.0 / math.sqrt(512))
+                x = tf.keras.layers.Dense(units=num_classes, kernel_initializer=initializer, bias_initializer=initializer, name='fc')(x)
+                x = tf.keras.layers.Softmax(name='softmax')(x)
                 return x
             return resnet(x, vars,num_classes)
 
-        class SoftAttention(layers.Layer):
+        class SoftAttention(tf.keras.layers.Layer):
             def __init__(self,ch,m,concat_with_x=False,aggregate=False,**kwargs):
                 self.channels=int(ch)
                 self.multiheads = m
@@ -213,45 +213,45 @@ class Models():
 
             def call(self, x):
 
-                exp_x = keras.backend.expand_dims(x,axis=-1)
+                exp_x = tf.keras.backend.expand_dims(x,axis=-1)
 
-                c3d = keras.backend.conv3d(exp_x,
+                c3d = tf.keras.backend.conv3d(exp_x,
                             kernel=self.kernel_conv3d,
                             strides=(1,1,self.i_shape[-1]), padding='same', data_format='channels_last')
-                conv3d = keras.backend.bias_add(c3d,
+                conv3d = tf.keras.backend.bias_add(c3d,
                                 self.bias_conv3d)
-                conv3d = keras.layers.Activation('relu')(conv3d)
+                conv3d = tf.keras.layers.Activation('relu')(conv3d)
 
-                conv3d = keras.backend.permute_dimensions(conv3d,pattern=(0,4,1,2,3))
+                conv3d = tf.keras.backend.permute_dimensions(conv3d,pattern=(0,4,1,2,3))
 
                 
-                conv3d = keras.backend.squeeze(conv3d, axis=-1)
-                conv3d = keras.backend.reshape(conv3d,shape=(-1, self.multiheads ,self.i_shape[1]*self.i_shape[2]))
+                conv3d = tf.keras.backend.squeeze(conv3d, axis=-1)
+                conv3d = tf.keras.backend.reshape(conv3d,shape=(-1, self.multiheads ,self.i_shape[1]*self.i_shape[2]))
 
-                softmax_alpha = keras.backend.softmax(conv3d, axis=-1) 
-                softmax_alpha = keras.layers.Reshape(target_shape=(self.multiheads, self.i_shape[1],self.i_shape[2]))(softmax_alpha)
+                softmax_alpha = tf.keras.backend.softmax(conv3d, axis=-1) 
+                softmax_alpha = tf.keras.layers.Reshape(target_shape=(self.multiheads, self.i_shape[1],self.i_shape[2]))(softmax_alpha)
 
                 if self.aggregate_channels==False:
-                    exp_softmax_alpha = keras.backend.expand_dims(softmax_alpha, axis=-1)       
-                    exp_softmax_alpha = keras.backend.permute_dimensions(exp_softmax_alpha,pattern=(0,2,3,1,4))
+                    exp_softmax_alpha = tf.keras.backend.expand_dims(softmax_alpha, axis=-1)       
+                    exp_softmax_alpha = tf.keras.backend.permute_dimensions(exp_softmax_alpha,pattern=(0,2,3,1,4))
         
-                    x_exp = keras.backend.expand_dims(x,axis=-2)
+                    x_exp = tf.keras.backend.expand_dims(x,axis=-2)
         
-                    u = keras.layers.Multiply()([exp_softmax_alpha, x_exp])   
+                    u = tf.keras.layers.Multiply()([exp_softmax_alpha, x_exp])   
         
-                    u = keras.layers.Reshape(target_shape=(self.i_shape[1],self.i_shape[2],u.shape[-1]*u.shape[-2]))(u)
+                    u = tf.keras.layers.Reshape(target_shape=(self.i_shape[1],self.i_shape[2],u.shape[-1]*u.shape[-2]))(u)
 
                 else:
-                    exp_softmax_alpha = keras.backend.permute_dimensions(softmax_alpha,pattern=(0,2,3,1))
+                    exp_softmax_alpha = tf.keras.backend.permute_dimensions(softmax_alpha,pattern=(0,2,3,1))
 
-                    exp_softmax_alpha = keras.backend.sum(exp_softmax_alpha,axis=-1)
+                    exp_softmax_alpha = tf.keras.backend.sum(exp_softmax_alpha,axis=-1)
 
-                    exp_softmax_alpha = keras.backend.expand_dims(exp_softmax_alpha, axis=-1)
+                    exp_softmax_alpha = tf.keras.backend.expand_dims(exp_softmax_alpha, axis=-1)
 
-                    u = keras.layers.Multiply()([exp_softmax_alpha, x])   
+                    u = tf.keras.layers.Multiply()([exp_softmax_alpha, x])   
 
                 if self.concat_input_with_scaled:
-                    o = keras.layers.Concatenate(axis=-1)([u,x])
+                    o = tf.keras.layers.Concatenate(axis=-1)([u,x])
                 else:
                     o = u
                 
@@ -263,6 +263,86 @@ class Models():
             
             def get_config(self):
                 return super(SoftAttention,self).get_config()
+
+        def build_VIT(new_img_size=72,patch_size=6,projection_dim=64,num_heads=4,transformer_layers=8,mlp_head_units=[2048,1024]):
+            num_patches = (new_img_size // patch_size) ** 2
+            transformer_units = [projection_dim * 2,projection_dim]
+
+            def mlp(x, hidden_units, dropout_rate):
+                for units in hidden_units:
+                    x = tf.keras.layers.Dense(units, activation=tf.keras.activations.gelu)(x)
+                    x = tf.keras.layers.Dropout(dropout_rate)(x)
+                return x
+
+            class Patches(keras.layers.Layer):
+                def __init__(self, patch_size):
+                    super().__init__()
+                    self.patch_size = patch_size
+                def call(self, images):
+                    input_shape = tf.shape(images)
+                    batch_size = input_shape[0]
+                    height = input_shape[1]
+                    width = input_shape[2]
+                    channels = input_shape[3]
+                    num_patches_h = height // self.patch_size
+                    num_patches_w = width // self.patch_size
+                    patches = tf.image.extract_patches(images=images,sizes=[1,self.patch_size,self.patch_size,1],strides=[1,self.patch_size,self.patch_size,1],rates=[1,1,1,1],padding="VALID")
+                    #patches = keras.ops.image.extract_patches(images, size=self.patch_size)
+                    patches = tf.reshape(patches,(batch_size,num_patches_h * num_patches_w, self.patch_size * self.patch_size * channels))
+                    #patches = keras.ops.reshape(patches,(
+                    #    batch_size,
+                    #    num_patches_h * num_patches_w,
+                    #    self.patch_size * self.patch_size * channels,
+                    #))
+                    return patches
+                def get_config(self):
+                    config = super().get_config()
+                    config.update({"patch_size": self.patch_size})
+                    return config
+            class PatchEncoder(keras.layers.Layer):
+                def __init__(self, num_patches, projection_dim):
+                    super().__init__()
+                    self.num_patches = num_patches
+                    self.projection = tf.keras.layers.Dense(units=projection_dim)
+                    self.position_embedding = tf.keras.layers.Embedding(input_dim=num_patches,output_dim=projection_dim)
+                def call(self, patch):
+                    positions = tf.expand_dims(tf.range(0,self.num_patches),axis=0)
+                    #positions = keras.ops.expand_dims(keras.ops.arange(start=0,stop=self.num_patches,step=1),axis=0)
+                    projected_patches = self.projection(patch)
+                    encoded = projected_patches + self.position_embedding(positions)
+                    return encoded
+                def get_config(self):
+                    config = super().get_config()
+                    config.update({"num_patches": self.num_patches})
+                    return config
+
+            data_aug = tf.keras.Sequential(
+                [
+                    #tf.keras.layers.Normalization(),
+                    tf.keras.layers.Resizing(new_img_size,new_img_size),
+                    tf.keras.layers.RandomFlip("horizontal"),
+                    tf.keras.layers.RandomRotation(factor=0.02),
+                    tf.keras.layers.RandomZoom(height_factor=0.2, width_factor=0.2),
+                ], name="data_augmentation")
+
+            inputs = tf.keras.Input(shape=self.img_shape)
+            augmented = data_aug(inputs)
+            patches = Patches(patch_size)(augmented)
+            encoded_patches = PatchEncoder(num_patches, projection_dim)(patches)
+            for _ in range(transformer_layers):
+                x1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)(encoded_patches)
+                attention_output = tf.keras.layers.MultiHeadAttention(num_heads=num_heads,key_dim=projection_dim, dropout=0.1)(x1,x1)
+                x2 = tf.keras.layers.Add()([attention_output,encoded_patches])
+                x3 = tf.keras.layers.LayerNormalization(epsilon=1e-6)(x2)
+                x3 = mlp(x3, hidden_units=transformer_units, dropout_rate=0.1)
+                encoded_patches = tf.keras.layers.Add()([x3,x2])
+            representation = tf.keras.layers.LayerNormalization(epsilon=1e-6)(encoded_patches)
+            representation = tf.keras.layers.Flatten()(representation)
+            representation = tf.keras.layers.Dropout(0.5)(representation)
+            features = mlp(representation, hidden_units=mlp_head_units, dropout_rate=0.5)
+            logits = tf.keras.layers.Dense(self.num_classes,activation="softmax")(features)
+            model = tf.keras.Model(inputs=inputs, outputs=logits)
+            return model
 
         print('INIT: Model: ',self.config.model_name)
         if self.config.model_init_type == 'RandNorm':
@@ -370,6 +450,31 @@ class Models():
             
             irv2 = tf.keras.applications.InceptionResNetV2(
                 include_top=True,
+                weights=None,
+                input_tensor=None,
+                input_shape=None,
+                pooling=None,
+                classifier_activation="softmax",
+            )
+
+            # Excluding the last 28 layers of the model. and using soft attention
+            conv = irv2.layers[-28].output
+            attention_layer,map2 = SoftAttention(aggregate=True,m=16,concat_with_x=False,ch=int(conv.shape[-1]),name='soft_attention')(conv)
+            attention_layer=(tf.keras.layers.MaxPooling2D(pool_size=(2, 2),padding="same")(attention_layer))
+            conv=(tf.keras.layers.MaxPooling2D(pool_size=(2, 2),padding="same")(conv))
+
+            conv = tf.keras.layers.concatenate([conv,attention_layer])
+            conv  = tf.keras.layers.Activation('relu')(conv)
+            conv = tf.keras.layers.Dropout(0.5)(conv)
+
+            output = tf.keras.layers.Flatten()(conv)
+            output = tf.keras.layers.Dense(self.num_classes, activation='softmax')(output)
+            self.model = tf.keras.models.Model(inputs=irv2.input, outputs=output)
+            self.output_is_logits = False
+        elif self.config.model_name == "IRv2_pre":
+
+            irv2 = tf.keras.applications.InceptionResNetV2(
+                include_top=True,
                 weights="imagenet",
                 input_tensor=None,
                 input_shape=None,
@@ -390,6 +495,10 @@ class Models():
             output = tf.keras.layers.Flatten()(conv)
             output = tf.keras.layers.Dense(self.num_classes, activation='softmax')(output)
             self.model = tf.keras.models.Model(inputs=irv2.input, outputs=output)
+            self.output_is_logits = False
+
+        elif self.config.model_name == "VIT":
+            self.model = build_VIT()
             self.output_is_logits = False
         else:
             print('Model not recognised')
@@ -524,13 +633,15 @@ class Models():
         return g #sum of all the grads in batch
 
 
-    
-    def compute_loss(self,imgs,labels):
-        with self.strategy.scope():
-            with tf.GradientTape() as tape:
-                preds = self.model(imgs,training=False)
-                loss = self.loss_func(labels,preds)
+    @tf.function
+    def compute_loss(self,data_inputs):
+        imgs,labels = data_inputs
+        with tf.GradientTape() as tape:
+            preds = self.model(imgs,training=False)
+            loss = self.loss_func(labels,preds)
         return loss
+
+    
 
     @tf.function
     def train_step(self,data_inputs):
@@ -561,8 +672,13 @@ class Models():
         return loss
 
     @tf.function
+    def distributed_get_loss_step(self,data_inputs):
+        per_replica_losses = self.strategy.run(self.compute_loss,args=(data_inputs,))
+        return per_replica_losses.values
+
+    @tf.function
     def distributed_train_step(self,data_inputs): #imgsand labels are dist batches
-        per_replica_losses = self.strategy.run(self.train_step,args=(data_inputs,))#run the train step on each replica
+        per_replica_losses = self.strategy.run(self.train_step,args=(data_inputs,)) #run the train step on each replica
         return self.strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses,axis=None)
     
     @tf.function

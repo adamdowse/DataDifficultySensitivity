@@ -89,7 +89,8 @@ def Main(config):
     with strategy.scope():
         model = Models.Models(config,data_obj.num_classes,strategy)
     
-    FIM_BS = 10
+    FIM_BS = 12
+    get_loss_BS = 12
 
     epoch_updated = False
 
@@ -147,19 +148,29 @@ def Main(config):
         ds_iter = iter(ds)
         print("Number of batches: ",num_batches)
         for _ in range(num_batches):
-            if batch_count%2 == 0 and config.record_step_FIM:
+            if config.record_step_FIM:
                 print("Batch: ",batch_count)
             elif batch_count%100 == 0:
                 print("Batch: ",batch_count)
+            t = time.time()
             total_loss += model.distributed_train_step(next(ds_iter))
+            print("Batch Train Time",time.time()-t)
             batch_count += 1
-            if config.record_step_FIM:
-                data_obj_2.get_loss(model,config.batch_size)
+            if config.record_step_FIM and (((batch_count-1) % 5 == 0) or batch_count-1 < 10):
+                t = time.time()
+                data_obj_2.get_loss(model,get_loss_BS)
+                print("Get Loss Time", time.time()-t)
                 k = 8
                 for i in range(k):
+                    t = time.time()
                     data_obj_2.reduce_data(method='loss',params=[1*i/k,1*(i+1)/k])
+                    print("Reduce Time",time.time()-t)
+                    t = time.time()
                     ds2,num_batches2 = data_obj_2.init_data(FIM_BS,train=True,distributed=True,shuffle=True)
+                    print("Init Time",time.time()-t)
+                    t = time.time()
                     step_stagedFIM = model.calc_dist_FIM(ds2,num_batches2,FIM_BS)
+                    print("FIM Calc Time",time.time()-t)
                     wandb.log({'step_stagedFIM_'+str(i):step_stagedFIM},step=batch_count+epoch_num*num_batches)
         train_loss = total_loss/num_batches
         print("Training Time: ",time.time()-t)
@@ -251,7 +262,7 @@ if __name__ == "__main__":
     #/com.docker.devenvironments.code/datasets/
         def __init__(self,args=None):
             #Hyperparameters
-            self.batch_size = 32          #batch size
+            self.batch_size = 256          #batch size
             self.lr = 0.001                #0.001 is adam preset in tf
             self.lr_decay_type = 'fixed'    #fixed, exp
             self.lr_decay_param = [1e-7]     #defult adam = [eplioon = 1e-7] SGD exp= [decay steps, decay rate]
@@ -260,37 +271,37 @@ if __name__ == "__main__":
             self.momentum = 0               #momentum for SGD  
 
             #length of training
-            self.epochs = 2             #max number of epochs
+            self.epochs = 1             #max number of epochs
             self.early_stop = 150           #number of epochs below threshold before early stop
             self.early_stop_epoch = 150     #epoch to start early stop
             self.steps_per_epoch = 1000      #number of batches per epoch
 
             #Results
-            self.group = 'T3_step_FIM' #group name for wandb
+            self.group = 'T7_001_step_FIM' #group name for wandb
             self.acc_sample_weight = None #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.record_FIM = False                 #record the full FIM    
             self.record_highloss_FIM = False        #record the FIM of the high loss samples
             self.record_lowloss_FIM = False         #record the FIM of the low loss samples
             self.record_staged_FIM = False          #record the FIM of the staged loss samples
-            self.record_FIM_n_data_points = 5000    #number of data points to use for FIM
+            self.record_FIM_n_data_points = 2500    #number of data points to use for FIM
             self.record_loss_spectrum = False       #record the loss spectrum
             self.record_original_FIM = False         #record the FIM before any training is done
             self.record_step_FIM = True             #record the FIM after each step
             
             #Data
             self.data = 'cifar10'          #cifar10 HAM10000 SVHN
-            self.img_size = (32,32,3)       #size of images (299,299) for IRv2
-            self.ds_root = '/com.docker.devenvironments.code/CIFAR10/' #root path of dataset
+            self.img_size = (32,32,3)       #size of images (299,299) for IRv2, (32,32,3) cifar
+            self.ds_root = '/vol/research/NOBACKUP/CVSSP/scratch_4weeks/ad00878/datasets/CIFAR10' #root path of dataset
             self.data_percentage = 1        #1 is full dataset HAM not implemented
             self.preaugment = 0         #number of images to preaugment
             self.label_smoothing = 0        #0 is no smoothing
             self.misslabel = 0              #0 is no misslabel
 
             #Model
-            self.model_name = 'TFCNN'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2(has ImageNet weights)
+            self.model_name = 'VIT'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2_pre(has ImageNet weights), IRv2
             self.model_init_type = None #Not recomended
             self.model_init_seed = np.random.randint(0,100000)
-            self.weight_decay = 0      #0.0001 is default for adam
+            self.weight_decay = 0.0001      #0.0001 is default for adam
 
             #Method
             args.method_index = args.method_index.split(' ')    #inputed as 'start_epoch method start_epoch method ...'

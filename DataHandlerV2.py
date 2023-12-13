@@ -101,17 +101,19 @@ class Data():
         
     #get the loss information for the next epoch
     def get_loss(self,model,bs=12):
+        t = time.time()
         #get the loss of the data
         #build dataset
         self.reduce_data(method='all')
-        dataset, num_batches = self.init_data(bs,train=True,distributed=False,shuffle=False)
+        dataset, num_batches = self.init_data(bs,train=True,shuffle=False)
         #get the loss
         iterator = iter(dataset)
         losses = np.array([])
         for i in range(num_batches):
             batch = next(iterator)
-            losses = np.append(losses,model.compute_loss(batch[0],batch[1]))
+            losses = np.append(losses,model.distributed_get_loss_step(batch))
         self.losses = losses
+        print("get loss time -->",time.time()-t)
 
     #reduce the data to the number of images wanted by creating a mask to limited data used
     def reduce_data(self,method,params=None):
