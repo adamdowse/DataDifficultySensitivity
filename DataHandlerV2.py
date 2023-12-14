@@ -204,10 +204,11 @@ class Data():
             img = tf.io.read_file(str(file_path)+"/"+img_name+".jpg")
             img = tf.image.decode_jpeg(img, channels=self.img_size[-1])
             img = tf.image.convert_image_dtype(img, tf.float32)
-            #img = tf.image.resize(img, self.img_size[:-1])
-            if model.pre_process_func != None:
-                img = model.pre_process_func(img)
-            print("img shape ",img.shape)
+            img = tf.image.resize(img, self.img_size[:-1])
+
+            #img = tf.keras.applications.mobilenet_v2.preprocess_input(img)
+            #img = tf.image.resize(img,[224,224])
+            #print("img shape ",img.shape)
             return img
         x_dataset = tf.data.Dataset.from_tensor_slices(img_names) #this will be the img names to use in training
         x_dataset = x_dataset.map(load_img, num_parallel_calls=tf.data.experimental.AUTOTUNE)#this is now imgs

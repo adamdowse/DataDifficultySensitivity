@@ -6,6 +6,7 @@ import tensorflow as tf
 import wandb   
 from tensorflow import keras
 from keras import layers
+
 import math
 import time
 import numpy as np
@@ -110,6 +111,7 @@ class Models():
             self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
             self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
             self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
+
 
     def model_init(self):
         def build_resnet(x,vars,num_classes,REG=0):
@@ -359,6 +361,7 @@ class Models():
         elif self.config.model_init_type == 'HeUnif':
             initialiser = tf.keras.initializers.HeUniform(seed=self.config.model_init_seed)
         else:
+            initialiser = None
             print('Model init type not recognised')
 
         
@@ -387,57 +390,259 @@ class Models():
                 tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
             ])
             self.output_is_logits = False
+            self.new_img_size = self.img_shape
         elif self.config.model_name == "CNN5":
             self.model = tf.keras.Sequential([
                 tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
                 tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
-                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
                 tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
             ])
             self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN5_NoPool":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN5_Dense1":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN5_Dense2":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN5_Dense3":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN5_DenseL":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(256,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN5_DenseXL":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(512,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN5_DenseXXL":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(1024,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
         elif self.config.model_name == "CNN6":
             self.model = tf.keras.Sequential([
                 tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(32,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
                 tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
-                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
-                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
                 tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
             ])
             self.output_is_logits = False
+            self.new_img_size = self.img_shape
         elif self.config.model_name == "CNN7":
             self.model = tf.keras.Sequential([
                 tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.Conv2D(32,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
                 tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
-                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
-                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
-                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.MaxPool2D(),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
                 tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
             ])
             self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN8":
+            #8 layer CNN
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(32,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(128,2,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN9":
+            #8 layer CNN
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(32,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(128,2,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN10":
+            #8 layer CNN
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN11":
+            #8 layer CNN
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN11_NoPool":
+            #8 layer CNN
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN12":
+            #8 layer CNN
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.Conv2D(512,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(256,3,activation='relu', kernel_initializer=initialiser,padding='same'),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+            
         elif self.config.model_name == "ResNet18":
             #build resnet18 model
             inputs = keras.Input(shape=self.img_shape)
@@ -650,7 +855,7 @@ class Models():
                 include_top = True,
                 weights = None,
                 alpha = 1.0,
-                input_shape = (224,224,3),
+                input_shape = None,
                 classes = self.num_classes,
                 classifier_activation = 'softmax'
             )
@@ -661,7 +866,6 @@ class Models():
                 return tf.image.resize(x,[224,224])
             self.pre_process_func = mobilenet_preprocess_input
             self.new_img_size = (224,224,3)
-
         elif self.config.model_name == "EfficientNetB0":
             self.model = tf.keras.applications.EfficientNetB0(
                 include_top = True,
@@ -694,10 +898,17 @@ class Models():
             print('Model not recognised')
 
         self.model.build(input_shape=self.new_img_size + (1,))
+    
+    def count_params(self):
+        trainable_params = np.sum([np.prod(v.get_shape()) for v in self.model.trainable_weights])
+        #non_trainable_params = np.sum([np.prod(v.get_shape()) for v in self.model.non_trainable_weights])
+        #total_params = trainable_params + non_trainable_params
+        return trainable_params
 
     def model_compile(self):
         self.model.summary()
         self.model.compile(optimizer=self.optimizer,loss=self.loss_func)
+        wandb.log({'Model':self.count_params()},step=0)
         
 
     def lr_schedule(self,epoch,init=False):

@@ -300,7 +300,7 @@ if __name__ == "__main__":
             self.misslabel = 0              #0 is no misslabel
 
             #Model
-            self.model_name = 'MobileNetV2'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2_pre(has ImageNet weights), IRv2
+            self.model_name = 'CNN5_DenseXXL'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2_pre(has ImageNet weights), IRv2
             self.model_init_type = None #Not recomended
             self.model_init_seed = np.random.randint(0,100000)
             self.weight_decay = 0.0001      #0.0001 is default for adam
