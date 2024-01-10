@@ -205,6 +205,8 @@ class Data():
             img = tf.image.decode_jpeg(img, channels=self.img_size[-1])
             img = tf.image.convert_image_dtype(img, tf.float32)
             img = tf.image.resize(img, self.img_size[:-1])
+            #scale between -1 and 1
+            #img = (img-0.5)*2
 
             #img = tf.keras.applications.mobilenet_v2.preprocess_input(img)
             #img = tf.image.resize(img,[224,224])
@@ -230,5 +232,7 @@ class Data():
                                                                     options=options)
         else:
             dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-
+        print("Number of batches: ",int(num_data/bs))
+        print("Number of data points: ",num_data)
+        print("Batch size: ",bs)
         return dataset, int(num_data/bs)

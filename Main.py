@@ -91,7 +91,7 @@ def Main(config):
     
     test_ds, test_num_batches = test_data_obj.init_data(config.batch_size,model,train=False,distributed=True,shuffle=False)
 
-    FIM_BS = 12
+    FIM_BS = 10
     get_loss_BS = 12
 
     epoch_updated = False
@@ -105,11 +105,27 @@ def Main(config):
             step_stagedFIM = model.calc_dist_FIM(ds2,num_batches2,FIM_BS)
             wandb.log({'step_stagedFIM_'+str(i):step_stagedFIM},step=0)
     
-    elif config.record_original_FIM:
+    elif config.record_original_FIM and False:
         data_obj_2.reduce_data(method='all')
         ds2,num_batches2 = data_obj_2.init_data(FIM_BS,model,train=True,distributed=True,shuffle=True)
         OGFIM = model.calc_dist_FIM(ds2,num_batches2,FIM_BS)
         wandb.log({'OriginalFIM':OGFIM},step=0)
+
+    elif config.record_original_FIM:
+        print("Original FIM Var")
+        data_obj_2.reduce_data(method='all')
+        _,num_batches2 = data_obj_2.init_data(FIM_BS,model,train=True,distributed=False,shuffle=True)
+        for j in range(1,num_batches2,num_batches2//10):
+            OGFIM = []
+            print("Data Init")
+            print(j)
+            for i in range(25):
+                data_obj_2.reduce_data(method='all')
+                ds2,num_batches2 = data_obj_2.init_data(FIM_BS,model,train=True,distributed=False,shuffle=True)
+                OGFIM = np.append(OGFIM,model.calc_dist_FIM(ds2,j,FIM_BS,dist=True))
+                print(OGFIM)
+            wandb.log({'OriginalFIMVar':np.var(OGFIM)},step=j)
+
     
 
     
@@ -279,13 +295,13 @@ if __name__ == "__main__":
             self.steps_per_epoch = 1000      #number of batches per epoch
 
             #Results
-            self.group = 'InitFIMs' #group name for wandb
+            self.group = 'nFIMVar' #group name for wandb
             self.acc_sample_weight = None #for HAM [1,1,1,1,5,1,1] for CIFAR [1,1,1,1,1,1,1,1,1,1]
             self.record_FIM = False                 #record the full FIM    
             self.record_highloss_FIM = False        #record the FIM of the high loss samples
             self.record_lowloss_FIM = False         #record the FIM of the low loss samples
             self.record_staged_FIM = False          #record the FIM of the staged loss samples
-            self.record_FIM_n_data_points = 5000    #number of data points to use for FIM
+            self.record_FIM_n_data_points = 10000    #number of data points to use for FIM
             self.record_loss_spectrum = False       #record the loss spectrum
             self.record_original_FIM = True        #record the FIM before any training is done
             self.record_step_FIM = False             #record the FIM after each step
@@ -300,9 +316,9 @@ if __name__ == "__main__":
             self.misslabel = 0              #0 is no misslabel
 
             #Model
-            self.model_name = 'CNN5_DenseXXL'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2_pre(has ImageNet weights), IRv2
+            self.model_name = 'CNN5'    #CNN, ResNet18, ACLCNN,ResNetV1-14,TFCNN,IRv2_pre(has ImageNet weights), IRv2
             self.model_init_type = None #Not recomended
-            self.model_init_seed = np.random.randint(0,100000)
+            self.model_init_seed = 1 #np.random.randint(0,100000)
             self.weight_decay = 0.0001      #0.0001 is default for adam
 
             #Method

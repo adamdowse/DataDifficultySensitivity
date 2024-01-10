@@ -406,6 +406,21 @@ class Models():
             ])
             self.output_is_logits = False
             self.new_img_size = self.img_shape
+        elif self.config.model_name == "CNN5_Scale-1to1":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
         elif self.config.model_name == "CNN5_NoPool":
             self.model = tf.keras.Sequential([
                 tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
@@ -983,7 +998,7 @@ class Models():
                    "adjusted_epoch":adjusted_epoch},
                    step=epoch_num)
 
-    def calc_dist_FIM(self,ds,num_batches,FIM_BS,record_FIM_n_data_points=None):
+    def calc_dist_FIM(self,ds,num_batches,FIM_BS,record_FIM_n_data_points=None,dist=True):
         
         #this needs to define the FIM
         #calc fim diag
@@ -992,26 +1007,60 @@ class Models():
         if record_FIM_n_data_points == None:
             #this is the original system that ensures a minimum number of batches are used
             record_FIM_n_data_points = self.config.record_FIM_n_data_points
-            lower_lim = np.min([record_FIM_n_data_points,num_batches*self.config.batch_size])
-            lower_lim = int(lower_lim/self.config.batch_size) #number of batches to use
-        else:
-            #This allows specifying of the number of data points to use
-            lower_lim = int(record_FIM_n_data_points/self.config.batch_size) #number of batches to use
-        replica_count = self.strategy.num_replicas_in_sync
-        self.FIM_BS = FIM_BS//replica_count
-        
-        data_count = 0
-        s = 0
-        iter_ds = iter(ds)
-        for _ in range(lower_lim):
-            if data_count/FIM_BS % 100 == 0:
-                print(data_count)
-            s += self.distributed_FIM_step(next(iter_ds))#send a batch to each replica
-            data_count += self.FIM_BS
-        mean = s/data_count
-        print('--> time: ',time.time()-t)
-        return mean
+            print("FIM_n_data_points not specified, using ",record_FIM_n_data_points)
+            print("Number of batches: ",num_batches)
+            lower_lim = int(np.min([record_FIM_n_data_points/FIM_BS,num_batches]))
 
+
+        print('FIM: Using ',lower_lim,' batches')
+        if dist:
+            replica_count = self.strategy.num_replicas_in_sync
+            self.FIM_BS = FIM_BS//replica_count
+            data_count = 0
+            s = 0
+            iter_ds = iter(ds)
+            for _ in range(lower_lim):
+                if data_count/FIM_BS % 100 == 0:
+                    print(data_count)
+                s += self.distributed_FIM_step(next(iter_ds))#send a batch to each replica
+                data_count += self.FIM_BS
+            mean = s/data_count
+            print('--> time: ',time.time()-t)
+            return mean
+            
+        else:
+            self.FIM_BS = FIM_BS
+            
+            if self.FIM_BS > 1:
+                data_count = 0
+                s = 0
+                iter_ds = iter(ds)
+                for _ in range(lower_lim):
+                    if data_count/FIM_BS % 100 == 0:
+                        print(data_count)
+                    s += self.Get_Z(next(iter_ds))#send a batch to each replica
+                    data_count += self.FIM_BS
+                mean = s/data_count
+                print('--> time: ',time.time()-t)
+                return mean
+            else:
+                #calc var as well as mean
+                data_count = 0
+                mean = 0
+                var = 0
+                iter_ds = iter(ds)
+                for _ in range(lower_lim):
+                    data_count += 1
+                    if data_count % 500 == 0:
+                        print(data_count)
+                    x = self.Get_Z_single(next(iter_ds)) #just one replica can be used here
+                    delta = x - mean 
+                    mean += delta/(data_count)
+                    var += delta*(x-mean)
+                    
+                var /= data_count
+                print('--> time: ',time.time()-t)
+                return [mean,var]
     @tf.function
     def distributed_FIM_step(self,items):#should be a batch of size 1
         replica_grads = self.strategy.run(self.Get_Z,args=(items,)) #this should return a list of grads for each replica
@@ -1020,6 +1069,8 @@ class Models():
     @tf.function
     def Get_Z(self,items):
         imgs,labels = items
+        print(imgs.shape)
+        print(labels.shape)
         with tf.GradientTape() as tape:
             y_hat = self.model(imgs,training=False)
             selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1))
@@ -1033,6 +1084,26 @@ class Models():
         g = tf.reduce_sum(g)
         return g #sum of all the grads in batch
 
+    @tf.function
+    def Get_Z_single(self,item):
+        img,label = item
+        print(img.shape)
+        print(label.shape)
+        with tf.GradientTape() as tape:
+            y_hat = self.model(img,training=False)
+            print(y_hat.shape)
+            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1))
+            print(selected.shape)
+            #output = tf.gather(y_hat,selected,axis=1,batch_dims=1)
+            output = tf.gather(y_hat,selected,axis=1)
+            output = tf.math.log(output)
+        g = tape.jacobian(output,self.model.trainable_variables)
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables]
+        g = [tf.reshape(g[i],(self.FIM_BS,layer_sizes[i])) for i in range(len(g))]
+        g = tf.concat(g,axis=1)
+        g = tf.square(g)
+        g = tf.reduce_sum(g)
+        return g #sum of all the grads in batch
 
     @tf.function
     def compute_loss(self,data_inputs):
