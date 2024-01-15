@@ -1090,12 +1090,12 @@ class Models():
         print(img.shape)
         print(label.shape)
         with tf.GradientTape() as tape:
-            y_hat = self.model(img,training=False)
+            y_hat = self.model(img,training=False) #[0.1,0.8,0.1,ect] this is output of softmax
             print(y_hat.shape)
-            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1))
+            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #[2]
             print(selected.shape)
             #output = tf.gather(y_hat,selected,axis=1,batch_dims=1)
-            output = tf.gather(y_hat,selected,axis=1)
+            output = tf.gather(y_hat,selected,axis=1) #[0.3]
             output = tf.math.log(output)
         g = tape.jacobian(output,self.model.trainable_variables)
         layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables]

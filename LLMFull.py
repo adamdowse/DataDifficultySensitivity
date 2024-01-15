@@ -116,22 +116,19 @@ embedding_dim = 16
 
 model = tf.keras.Sequential([
     layers.Embedding(max_features + 1, embedding_dim, input_length=sequence_length),
-    layers.Conv1D(128, 5, activation='relu'),
+    layers.Conv1D(128, 5, activation='leaky_relu'),
     layers.MaxPooling1D(2),
-    layers.Conv1D(64, 5, activation='relu'),
-    layers.Dropout(0.2),
-    layers.MaxPooling1D(2),
-    layers.Conv1D(32, 5, activation='relu'),
+    layers.Conv1D(64, 5, activation='leaky_relu'),
     layers.Dropout(0.2),
     layers.GlobalMaxPooling1D(),
-    layers.Dense(64, activation='relu'),
+    layers.Dense(64, activation='leaky_relu'),
     layers.Dense(1)
 ])
 
 model.summary()
 
 #optimizer = tf.keras.optimizers.SGD(learning_rate=0.01, momentum=0.5)
-optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
 model.compile(loss=losses.BinaryCrossentropy(from_logits=True),
                 optimizer=optimizer,
                 metrics=tf.metrics.BinaryAccuracy(threshold=0.0))
@@ -178,11 +175,18 @@ while current_epoch <= epochs:
     #create a new dataset that contains only the lowest 5% of the loss
     def filter_dataset_by_loss(dataset, model, loss_function, threshold_percentage, less_than=True):
         # Compute the losses for all examples and store them in a new dataset
+        # de batch the dataset
+        dataset = dataset.unbatch()
+        dataset = dataset.batch(1)
         losses_and_data = []
+        c=0
         for inputs, targets in dataset:
             predictions = model(inputs,training=False)
             loss = loss_function(targets, predictions)
+            c+=1
             losses_and_data.append((loss.numpy(), inputs, targets))
+        
+        print("c",c)
 
         # Convert to a tf.data.Dataset
         losses_and_data_dataset = tf.data.Dataset.from_generator(
@@ -206,13 +210,18 @@ while current_epoch <= epochs:
 
         # Filter the dataset
         filtered_dataset = losses_and_data_dataset.filter(filter_func)
+        c=0
+        for _,_,_ in filtered_dataset:
+            c+=1
+        print("fc",c)
 
         # If you want to remove the loss from the dataset after filtering
         filtered_dataset = filtered_dataset.map(lambda loss, inputs, targets: (inputs, targets))
+        filtered_dataset = filtered_dataset.unbatch()
+        filtered_dataset = filtered_dataset.batch(batch_size)
 
-        return filtered_dataset
-
-    filtered_dataset = filter_dataset_by_loss(train_ds, model, losses.BinaryCrossentropy(from_logits=True), 95, less_than=False)
+        return filtered_dataset, c
+    filtered_dataset,c = filter_dataset_by_loss(train_ds, model, losses.BinaryCrossentropy(from_logits=True), 95, less_than=False)
 
     iter_ds = iter(filtered_dataset)
     #loop batches
@@ -244,7 +253,41 @@ while current_epoch <= epochs:
                 print("ZERO grad found", x_mean)
 
     print("FIM", x_mean)
-    wandb.log({"FIM": x_mean}, step=current_epoch)  
+    wandb.log({"FIM_high": x_mean}, step=current_epoch)  
+
+    filtered_dataset,c = filter_dataset_by_loss(train_ds, model, losses.BinaryCrossentropy(from_logits=True), 5, less_than=True)
+
+    iter_ds = iter(filtered_dataset)
+    #loop batches
+    x_mean = 0
+    c = 0
+    for _ in range(10):
+        text_batch, label_batch = next(iter_ds)
+        for i in range(len(text_batch)):
+            if c % 100 == 0:
+                print(c)
+            with tf.GradientTape() as tape:
+                #print(text_batch[i])
+                item = tf.expand_dims(text_batch[i],0)
+                y_hat = model(item,training=False) #[0.2]
+                y_hat = tf.nn.sigmoid(y_hat)                #convert to probabilities [0.3]
+                y_hat = tf.concat([1-y_hat,y_hat],axis=1) #[0.3,0.7]  #convert to categorical
+                selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat),1),axis=0) #DO I NEED TO LOG THIS Y_HAT?
+                output = tf.gather(y_hat,selected,axis=1) #Check dimentions
+                output = tf.math.log(output)
+
+            g = tape.gradient(output,model.trainable_variables)
+            g = [tf.square(i) for i in g]
+            g = [tf.reduce_sum(i) for i in g]
+            g = tf.reduce_sum(g)
+            
+            c += 1
+            x_mean = x_mean + (g - x_mean)/c
+            if g == 0:
+                print("ZERO grad found", x_mean)
+
+    print("FIM", x_mean)
+    wandb.log({"FIM_low": x_mean}, step=current_epoch) 
 
     current_epoch += 1
 

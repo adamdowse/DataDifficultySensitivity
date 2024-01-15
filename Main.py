@@ -331,13 +331,6 @@ if __name__ == "__main__":
             self.seed = 1
             
             
-            
-
-            
-            
-            
-            
-        
 
     config = config_class(args=parser.parse_args())
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
