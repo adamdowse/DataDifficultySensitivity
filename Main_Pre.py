@@ -155,7 +155,7 @@ FIM_BS = 2
 while current_epoch <= epochs:
     print("Epoch", current_epoch)
     bc = 0
-    history = model.fit(train_ds,test_ds, epochs=1, verbose=2)
+    history = model.fit(train_ds,validation_data=test_ds, epochs=1, verbose=1)
 
     wandb.log({"loss":history.history['loss'][-1],
         "val_loss":history.history['val_loss'][-1],
@@ -168,13 +168,13 @@ while current_epoch <= epochs:
         low_perc = int(100/groups)*n
         high_perc = int(100/groups)*(n+1)
 
-        filtered_dataset,c new_batch_count = filter_dataset_by_loss(train_ds,
-                                    model,
-                                    tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
-                                    low_perc,
-                                    high_perc,
-                                    FIM_BS,
-                                    max_data=10) #new batch size for FIM
+        filtered_dataset,c, new_batch_count = filter_dataset_by_loss(train_ds,
+                                                model,
+                                                tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
+                                                low_perc,
+                                                high_perc,
+                                                FIM_BS,
+                                                max_data=10) #new batch size for FIM
         print("Group:",n,"Batches:",new_batch_count,"Data Points:",c)
 
         x_mean = 0
