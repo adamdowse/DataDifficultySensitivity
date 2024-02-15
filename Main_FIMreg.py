@@ -22,7 +22,7 @@ def Main():
     
     #setup
     tf.keras.backend.clear_session()
-    wandb.init(project='GFIMUseage',config=config.__dict__)
+    wandb.init(project='GFIMUseage')
     #dataset = DataHandler.DataHandler(config)
 
 
@@ -34,7 +34,8 @@ def Main():
     def preprocess(item):
         img = item['image']
         img = tf.cast(img,tf.float32)/255.0
-        label = item['label']
+        #convert label to onehot
+        label = tf.one_hot(item['label'],10)
         return img,label
 
     train_ds = train_ds.map(preprocess)
@@ -42,29 +43,30 @@ def Main():
 
     #create model
     model = tf.keras.Sequential([
-            tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape),
+            tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=(28,28,1)),
             tf.keras.layers.MaxPool2D(),
             tf.keras.layers.Conv2D(64,3,activation='relu'),
             tf.keras.layers.MaxPool2D(),
             tf.keras.layers.Flatten(),
             tf.keras.layers.Dense(128,activation='relu'),
-            tf.keras.layers.Dense(self.num_classes,activation='softmax')
+            tf.keras.layers.Dense(10,activation='softmax')
         ])
 
     #compile model with optimizer and loss function
-    model.compile(optimizer='SGD',loss='sparse_categorical_crossentropy',metrics=['accuracy'])
+    model.compile(optimizer='SGD',loss='categorical_crossentropy',metrics=['accuracy'])
 
     GROUPS = 10
+    BS = 32
+    data_count = 50000
 
     def record_losses(ds,ds_datacount,bs,model):
         #record losses and add to ds
         iter_ds = iter(ds)
         losses = np.zeros(ds_datacount)
-        #do in batches
-        for i in range(ds_size):
+        for i in range(ds_datacount):
             x,y = next(iter_ds)
             loss = model.evaluate(x,y)
-            losses[i*bs:(i+1)*bs] = loss
+            losses[i] = loss
         
         #group losses into n groups
         oredered_losses = np.sort(losses)
@@ -86,7 +88,7 @@ def Main():
 
     def split_GFIM_ds(ds,model,loss_info,group_num): #ds is a tuple of (x,y,loss)
         #record GFIM
-        sub_ds = ds.filter(lambda x,y,loss: if loss >= loss_info[0][group_num] and loss <= loss_info[1][group_num])
+        sub_ds = ds.filter(lambda x,y,loss: loss >= loss_info[0][group_num] and loss <= loss_info[1][group_num])
         return sub_ds
 
     @tf.function
@@ -98,7 +100,7 @@ def Main():
         #output = tf.gather(y_hat,selected,axis=1,batch_dims=1)
         output = tf.gather(y_hat,selected,axis=1) #[0.3]
         output = tf.math.log(output)
-        g = tape.jacobian(output,.model.trainable_variables)
+        g = tape.jacobian(output,model.trainable_variables)
         layer_sizes = [tf.reduce_sum(tf.size(v)) for v in model.trainable_variables]
         g = [tf.reshape(g[i],(layer_sizes[i])) for i in range(len(g))] #TODO check that this dosent need to deal with batches
         g = tf.concat(g,axis=1)
@@ -128,7 +130,7 @@ def Main():
         for i in range(GROUPS):
             if GFIM_history[-1][i] < GFIM_history[-2][i]:
                 removed_groups.append(i)
-                ds = ds.filter(lambda x,y,loss: if loss >= loss_info[0][i] and loss <= loss_info[1][i])
+                ds = ds.filter(lambda x,y,loss: loss >= loss_info[0][i] and loss <= loss_info[1][i])
                 wandb.log({'group_used'+str(i):0},step=epoch)
             else:
                 wandb.log({'group_used'+str(i):1},step=epoch)
@@ -142,13 +144,13 @@ def Main():
         
         
 
-    GFIM_history = np.zeros(1,GROUPS)#[[0,0,0,0,0,0,0,0,0,0]] -> [[0,0,0,0,0,0,0,0,0,0],[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1]] ect
+    GFIM_history = np.zeros((1,GROUPS))#[[0,0,0,0,0,0,0,0,0,0]] -> [[0,0,0,0,0,0,0,0,0,0],[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1]] ect
 
-    max_epoch = 20
+    max_epochs = 20
     burnin_epochs = 2
     for epoch in range(max_epochs):
         if epoch < burnin_epochs:
-            loss_ds, loss_info = record_losses(train_ds,60000,32,model)
+            loss_ds, loss_info = record_losses(train_ds,data_count,BS,model)
             temp_GFIM_history = np.zeros(GROUPS)
             for i in range(GROUPS):
                 sub_ds = split_GFIM_ds(loss_ds,model,loss_info,i)
@@ -160,7 +162,7 @@ def Main():
             wandb.log(hist.history,step=epoch)
 
         else:
-            loss_ds, loss_info = record_losses(train_ds,60000,32,model)
+            loss_ds, loss_info = record_losses(train_ds,data_count,32,model)
             for i in range(GROUPS):
                 sub_ds = split_GFIM_ds(loss_ds,model,loss_info,i)
                 record_GFIM(sub_ds,model)
