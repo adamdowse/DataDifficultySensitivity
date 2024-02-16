@@ -25,6 +25,9 @@ def Main():
     wandb.init(project='GFIMUseage')
     #dataset = DataHandler.DataHandler(config)
 
+    GROUPS = 10
+    BS = 32
+    data_count = 50000
 
     #load data
     train_ds = tfds.load(name="mnist", split="train") #This should be a tf.data.Dataset
@@ -41,33 +44,38 @@ def Main():
     train_ds = train_ds.map(preprocess)
     test_ds = test_ds.map(preprocess)
 
+    train_ds = train_ds.batch(BS)
+    test_ds = test_ds.batch(BS)
+
     #create model
+    initializer = tf.keras.initializers.GlorotNormal(seed=42)
     model = tf.keras.Sequential([
-            tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=(28,28,1)),
+            tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=(28,28,1),kernel_initializer=initializer),
             tf.keras.layers.MaxPool2D(),
-            tf.keras.layers.Conv2D(64,3,activation='relu'),
+            tf.keras.layers.Conv2D(64,3,activation='relu',kernel_initializer=initializer),
             tf.keras.layers.MaxPool2D(),
             tf.keras.layers.Flatten(),
-            tf.keras.layers.Dense(128,activation='relu'),
-            tf.keras.layers.Dense(10,activation='softmax')
+            tf.keras.layers.Dense(128,activation='relu',kernel_initializer=initializer),
+            tf.keras.layers.Dense(10,activation='softmax',kernel_initializer=initializer)
         ])
 
     #compile model with optimizer and loss function
     model.compile(optimizer='SGD',loss='categorical_crossentropy',metrics=['accuracy'])
 
-    GROUPS = 10
-    BS = 32
-    data_count = 50000
-
     def record_losses(ds,ds_datacount,bs,model):
+        print('recording losses')
+        #ds =ds.unbatch()
+        #ds = ds.batch(1)
         #record losses and add to ds
         iter_ds = iter(ds)
         losses = np.zeros(ds_datacount)
-        for i in range(ds_datacount):
+        for i in range(ds_datacount//bs):
             x,y = next(iter_ds)
-            loss = model.evaluate(x,y)
-            losses[i] = loss
-        
+            with tf.GradientTape() as tape:
+                y_hat = model(x,training=False)
+                loss = tf.keras.losses.categorical_crossentropy(y,y_hat)
+            losses[i*bs:i*bs + len(loss)] = loss
+
         #group losses into n groups
         oredered_losses = np.sort(losses)
         group_size = int(ds_datacount/GROUPS)
@@ -80,13 +88,14 @@ def Main():
             grouped_losses[i] = np.mean(oredered_losses[i*group_size:(i+1)*group_size])
             wandb.log({'loss_group'+str(i):grouped_losses},step=epoch)
 
-
         #add losses to ds
+        ds = ds.unbatch()
         loss_ds = tf.data.Dataset.from_tensor_slices(losses)
-        ds = tf.data.Dataset.zip((ds,loss_ds)) #this should be a tuple of (x,y,loss)
-        return ds, (min_losses,max_losses,group_size) #TODO chenage this to handle different gourp sizes
+        ds = tf.data.Dataset.zip(ds,loss_ds).map(lambda og,loss: (og[0],og[1],loss))
+        return ds, (min_losses,max_losses,group_size)
 
-    def split_GFIM_ds(ds,model,loss_info,group_num): #ds is a tuple of (x,y,loss)
+    def split_GFIM_ds(ds,loss_info,group_num): #ds is a tuple of (x,y,loss)
+        print('splitting GFIM ds')
         #record GFIM
         sub_ds = ds.filter(lambda x,y,loss: loss >= loss_info[0][group_num] and loss <= loss_info[1][group_num])
         return sub_ds
@@ -96,11 +105,14 @@ def Main():
         img,label,loss = item
         with tf.GradientTape() as tape:
             y_hat = model(img,training=False) #[0.1,0.8,0.1,ect] this is output of softmax
-        selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #[2]
-        #output = tf.gather(y_hat,selected,axis=1,batch_dims=1)
-        output = tf.gather(y_hat,selected,axis=1) #[0.3]
+            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #[2]
+            #output = tf.gather(y_hat,selected,axis=1,batch_dims=1)
+            output = tf.gather(y_hat,selected,axis=1,batch_dims=0) #[0.3]
+        print('output:',output)
         output = tf.math.log(output)
         g = tape.jacobian(output,model.trainable_variables)
+        print('g:',g)
+        pnt()
         layer_sizes = [tf.reduce_sum(tf.size(v)) for v in model.trainable_variables]
         g = [tf.reshape(g[i],(layer_sizes[i])) for i in range(len(g))] #TODO check that this dosent need to deal with batches
         g = tf.concat(g,axis=1)
@@ -108,12 +120,13 @@ def Main():
         g = tf.reduce_sum(g)
         return g
 
-    def record_GFIM(ds,model,group_num):
-        iter_ds = iter(ds)
+    def record_GFIM(ds,model,group_num,group_info):
+        print('recording GFIM')
+        ds = ds.batch(1)
         data_count = 0
         mean = 0
         iter_ds = iter(ds)
-        for _ in range(lower_lim):
+        for _ in range(group_info[2]):
             data_count += 1
             if data_count % 500 == 0:
                 print(data_count)
@@ -148,13 +161,15 @@ def Main():
 
     max_epochs = 20
     burnin_epochs = 2
+
     for epoch in range(max_epochs):
+        print('Epoch:',epoch)
         if epoch < burnin_epochs:
             loss_ds, loss_info = record_losses(train_ds,data_count,BS,model)
             temp_GFIM_history = np.zeros(GROUPS)
             for i in range(GROUPS):
-                sub_ds = split_GFIM_ds(loss_ds,model,loss_info,i)
-                g = record_GFIM(sub_ds,model)
+                sub_ds = split_GFIM_ds(loss_ds,loss_info,i)
+                g = record_GFIM(sub_ds,model,i,loss_info)
                 temp_GFIM_history[i] = g
             GFIM_history = np.vstack((GFIM_history,temp_GFIM_history))
             #train on full dataset
@@ -162,6 +177,7 @@ def Main():
             wandb.log(hist.history,step=epoch)
 
         else:
+            pnt()
             loss_ds, loss_info = record_losses(train_ds,data_count,32,model)
             for i in range(GROUPS):
                 sub_ds = split_GFIM_ds(loss_ds,model,loss_info,i)
