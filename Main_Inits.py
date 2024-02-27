@@ -1,16 +1,12 @@
 #This project aims to connect the inital FIM of a variety of CNN models with the final test accuracy of the model.
-
-
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import numpy as np
 import wandb
 import os
-
 import Init_Models as im
 
 #sweep data
-
 sweep_config = {
     "name": "CNN0",
     "method": "random",
@@ -22,18 +18,26 @@ sweep_config = {
     }
 }
 
+COUNT = 20
+MAX_EPOCHS = 40
+
 Best_BS = 0
 Best_LR = 0
 Best_Val_Acc = 0
 
 
 def optimise_hyperparameters():
+    global Best_BS
+    global Best_LR
+    global Best_Val_Acc
+    global MAX_EPOCHS
     #get config values
     run = wandb.init(entity = "<entity>", project="Model_Initialisation")
     lr = run.config.lr
     bs = run.config.bs
-    model_name = run.config.model
-    max_epochs = 30
+    model_name = sweep_config['parameters']['model']['value']
+    print('Model:',model_name)
+    max_epochs = MAX_EPOCHS
 
     #setup data 
     #get mnist data from tfds
@@ -51,7 +55,7 @@ def optimise_hyperparameters():
     test_ds = test_ds.batch(bs)
 
     #pull model from seperate file
-    model = im.get_model(model_name)
+    model = im.get_model(model_name,(28,28,1),10)
 
     #compile the model
     optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
@@ -70,24 +74,30 @@ def optimise_hyperparameters():
         callbacks=[wandb_callback,early_stopping])
 
     #if best val accuracy, record the values
+
     if hist.history['val_accuracy'][-1] > Best_Val_Acc:
         Best_Val_Acc = hist.history['val_accuracy'][-1]
         Best_BS = bs
         Best_LR = lr
+    print('Best Val Acc:',Best_Val_Acc)
+    print('Best BS:',Best_BS)
+    print('Best LR:',Best_LR)
     return 
 
 
 def init_FIM():
+    global Best_BS
+    global Best_LR
+    global MAX_EPOCHS
     #clear tf session
     tf.keras.backend.clear_session()
+    run = wandb.init(entity = "<entity>", project="Model_Initialisation")
     # Get best run parameters
-    best_run = sweep.best_run()
-    best_parameters = best_run.config
     lr = Best_LR
     bs = Best_BS
-    model_name = best_run.config.model
+    model_name = sweep_config['parameters']['model']['value']
 
-    max_epochs = 30
+    max_epochs = MAX_EPOCHS
 
     #setup data 
     #get mnist data from tfds
@@ -105,7 +115,7 @@ def init_FIM():
     test_ds = test_ds.batch(bs)
 
     #pull model from seperate file
-    model = im.get_model(model_name)
+    model = im.get_model(model_name,(28,28,1),10)
 
     #compile the model
     optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
@@ -115,10 +125,10 @@ def init_FIM():
         metrics=['accuracy'])
 
     #callbacks
-    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=3)
 
     def Get_Z_single(item):
-        img,label,loss = item
+        img,label = item
         with tf.GradientTape() as tape:
             y_hat = model(img,training=False) #[0.1,0.8,0.1,ect] this is output of softmax
             output = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #[2]
@@ -163,6 +173,8 @@ def init_FIM():
 
     #log max val accuracy
     wandb.log({'Max_Val_Acc':max(hist.history['val_accuracy'])},step=0)
+    wandb.log({'Best_BS':Best_BS},step=0)
+    wandb.log({'Best_LR':Best_LR},step=0)
     return 
 
 
@@ -170,7 +182,7 @@ os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
 wandb.login()
 
 sweep_id = wandb.sweep(sweep_config, project="Model_Initialisation")
-wandb.agent(sweep_id, function=optimise_hyperparameters, count=3)
+wandb.agent(sweep_id, function=optimise_hyperparameters, count=COUNT)
 
 init_FIM()
 
