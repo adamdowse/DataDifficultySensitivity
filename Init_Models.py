@@ -104,7 +104,7 @@ def CNN5_Dense3(img_shape, num_classes):
         tf.keras.layers.Dense(128,activation='relu'),
         tf.keras.layers.Dense(num_classes,activation='softmax')
     ])
-    retunr model
+    return model
 
 def CNN5_DenseL(img_shape, num_classes):
     model = tf.keras.Sequential([
