@@ -294,7 +294,7 @@ def get_model(model_name,img_shape, num_classes):
     elif model_name == "CNN5_Dense3":   return CNN5_Dense3(img_shape, num_classes)
     elif model_name == "CNN5_DenseL":   return CNN5_DenseL(img_shape, num_classes)
     elif model_name == "CNN5_DenseXL":  return CNN5_DenseXL(img_shape, num_classes)
-    elif model_name == "CNN5_DenseXXL":     return CNN5_DenseXXL(img_shape, num_classes)
+    elif model_name == "CNN5_DenseXXL": return CNN5_DenseXXL(img_shape, num_classes)
     elif model_name == "CNN6":          return CNN6(img_shape, num_classes)
     elif model_name == "CNN7":          return CNN7(img_shape, num_classes)
     elif model_name == "CNN8":          return CNN8(img_shape, num_classes)

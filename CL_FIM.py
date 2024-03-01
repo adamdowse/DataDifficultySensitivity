@@ -10,10 +10,11 @@ import Init_Models as im
 
 
 class CustomCallback(Callback):
-    def __init__(self, FIM_DS, FIM_name):
+    def __init__(self, FIM_DS, FIM_name, epoch_multiplier=1):
         super().__init__()
         self.FIM_DS = FIM_DS
         self.FIM_name = FIM_name
+        self.epoch_multiplier = epoch_multiplier
 
     def __Get_Z_single(self,item):
         img,label = item
@@ -26,7 +27,7 @@ class CustomCallback(Callback):
             output = tf.math.log(output)
         g = tape.gradient(output,self.model.trainable_variables)#This or Jacobian?
         
-        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in model.trainable_variables]
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables]
         g = [tf.reshape(g[i],(layer_sizes[i])) for i in range(len(g))] #TODO check that this dosent need to deal with batches
         g = tf.concat(g,axis=0)
         g = tf.square(g)
@@ -40,7 +41,7 @@ class CustomCallback(Callback):
         data_count = 0
         mean = 0
         iter_ds = iter(ds)
-        low_lim = 1000
+        low_lim = 2000
         for _ in range(low_lim):
             data_count += 1
             if data_count % 500 == 0:
@@ -51,13 +52,15 @@ class CustomCallback(Callback):
         return mean
 
     def on_epoch_begin(self, epoch, logs=None):
-        print(f"Starting epoch {epoch}")
+        pass
 
     def on_epoch_end(self, epoch, logs=None):
         print(f"Finished epoch {epoch}")
         #record the GFIM
         FIM = self.__record_GFIM()
-        wandb.log({self.FIM_name:FIM},step=epoch)
+        print(epoch)
+        wandb.log({self.FIM_name:FIM},step=(epoch+1)*self.epoch_multiplier)
+
         
         
 
@@ -99,22 +102,31 @@ def Build_Dataset(combined=True):
 
     hard_ds = hard_ds.map(augment)
 
+    #save one picture from each dataset
+    easy_img = next(iter(easy_ds))[0]
+    wandb.log({"easy_img": [wandb.Image(easy_img.numpy())]},step=0)
+    hard_img = next(iter(hard_ds))[0]
+    wandb.log({"hard_img": [wandb.Image(hard_img.numpy())]},step=0)
+
 
     #combine both datasets and shuffle
     if combined:
         combined_ds = easy_ds.concatenate(hard_ds)
         combined_ds = combined_ds.shuffle(50000).batch(32)
-        return combined_ds,test_ds
+        easy_ds = easy_ds.shuffle(25000).batch(32)
+        hard_ds = hard_ds.shuffle(25000).batch(32)
+        test_ds = test_ds.batch(32)
+        return combined_ds,easy_ds,hard_ds,test_ds
     else:
         easy_ds = easy_ds.shuffle(25000).batch(32)
         hard_ds = hard_ds.shuffle(25000).batch(32)
+        test_ds = test_ds.batch(32)
         return easy_ds, hard_ds,test_ds
     
 
-def Main(combined=True):
+def Main(method_type="Sequential"):
     max_epochs = 10
     lr = 0.01
-
 
     #pull in the model
     model = im.get_model("CNN3",(28,28,1), 10)
@@ -124,19 +136,36 @@ def Main(combined=True):
     wandb_callback = wandb.keras.WandbCallback(save_model=False)
 
     #pull in a dataset
-    if combined:
-        dataset,test_ds = Build_Dataset(combined=True)
-        model.fit(dataset, validation_data=test_ds ,epochs=max_epochs, callbacks=[wandb_callback,CustomCallback(dataset,"FIM")])
-    else:
+    if method_type == "Combined":
+        #Train on the full combined ds
+        dataset,easy_ds,hard_ds,test_ds = Build_Dataset(combined=True)
+        model.fit(dataset, validation_data=test_ds ,epochs=max_epochs, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM",epoch_multiplier=2),CustomCallback(hard_ds,"Hard_FIM",epoch_multiplier=2)])
+    elif method_type == "Sequential":
+        #Train on the easy dataset first, then the hard dataset
         easy_ds, hard_ds,test_ds = Build_Dataset(combined=False)
-        model.fit(easy_ds, epochs=max_epochs, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
-        model.fit(hard_ds, epochs=max_epochs,validation_data=test_ds, initial_epoch=0, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
-        
+        model.fit(easy_ds, epochs=max_epochs,validation_data=test_ds, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
+        model.fit(hard_ds, epochs=max_epochs*2,validation_data=test_ds, initial_epoch=max_epochs, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
+    elif method_type == "Additive":
+        #Train on the easy dataset first, then the combined dataset
+        dataset,easy_ds,hard_ds,test_ds = Build_Dataset(combined=True)
+        model.fit(easy_ds, epochs=max_epochs,validation_data=test_ds, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
+        model.fit(dataset, epochs=max_epochs+(max_epochs//2+1),validation_data=test_ds, initial_epoch=max_epochs, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM",epoch_multiplier=2),CustomCallback(hard_ds,"Hard_FIM",epoch_multiplier=2)])
+    else:
+        print("Invalid method type")
+        return
+
 
 if __name__ == "__main__":
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
     wandb.login()
-    wandb.init(project="CL_FIM")
-    Main(combined=True)
+    config = {
+        "type":"Additive",
+        "model":"CNN3",
+        "dataset":"MNIST",
+        "aug_percent":"0.2",
+        "aug_test":"False",
+    }
+    wandb.init(project="CL_FIM",config=config)
+    Main(method_type="Additive")
     print("done")
 
