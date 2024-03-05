@@ -67,40 +67,72 @@ class CustomCallback(Callback):
 
 
 
-def Build_Dataset(combined=True):
-    #download the mnist dataset
+def Build_Dataset(combined=True,name="MNIST",aug_percent=0.2):
+    if name == "MNIST":
+        #download the mnist dataset
+        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
 
-    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+        #split the dataset in half
+        x_train_easy = x_train[:len(x_train)//2]
+        y_train_easy = y_train[:len(y_train)//2]
+        x_train_hard = x_train[len(x_train)//2:]
+        y_train_hard = y_train[len(y_train)//2:]
 
-    #split the dataset in half
-    x_train_easy = x_train[:len(x_train)//2]
-    y_train_easy = y_train[:len(y_train)//2]
-    x_train_hard = x_train[len(x_train)//2:]
-    y_train_hard = y_train[len(y_train)//2:]
-
-    easy_ds = tf.data.Dataset.from_tensor_slices((x_train_easy, y_train_easy))
-    hard_ds = tf.data.Dataset.from_tensor_slices((x_train_hard, y_train_hard))
-    test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+        easy_ds = tf.data.Dataset.from_tensor_slices((x_train_easy, y_train_easy))
+        hard_ds = tf.data.Dataset.from_tensor_slices((x_train_hard, y_train_hard))
+        test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 
 
-    #normalise the datasets
-    def normalise(image, label):
-        image = tf.cast(image, tf.float32) / 255.0
-        return image, label
+        #normalise the datasets
+        def normalise(image, label):
+            image = tf.cast(image, tf.float32) / 255.0
+            return image, label
 
-    hard_ds = hard_ds.map(normalise)
-    easy_ds = easy_ds.map(normalise)
-    test_ds = test_ds.map(normalise)
+        hard_ds = hard_ds.map(normalise)
+        easy_ds = easy_ds.map(normalise)
+        test_ds = test_ds.map(normalise)
 
-    #augment the hard dataset
-    def augment(image, label):
-        def noise(image):
-            noise = tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=0.2, dtype=tf.float32)
-            return image + noise
-        image = noise(image)
-        return image, label
+        #augment the hard dataset
+        def augment(image, label):
+            def noise(image):
+                noise = tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=aug_percent, dtype=tf.float32)
+                return image + noise
+            image = noise(image)
+            return image, label
 
-    hard_ds = hard_ds.map(augment)
+        hard_ds = hard_ds.map(augment)
+    
+    elif name == "CIFAR10":
+        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+
+        #split the dataset in half
+        x_train_easy = x_train[:len(x_train)//2]
+        y_train_easy = y_train[:len(y_train)//2]
+        x_train_hard = x_train[len(x_train)//2:]
+        y_train_hard = y_train[len(y_train)//2:]
+
+        easy_ds = tf.data.Dataset.from_tensor_slices((x_train_easy, y_train_easy))
+        hard_ds = tf.data.Dataset.from_tensor_slices((x_train_hard, y_train_hard))
+        test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+
+        #normalise the datasets
+        def normalise(image, label):
+            image = tf.cast(image, tf.float32) / 255.0
+            return image, label
+
+        hard_ds = hard_ds.map(normalise)
+        easy_ds = easy_ds.map(normalise)
+        test_ds = test_ds.map(normalise)
+
+        #augment the hard dataset
+        def augment(image, label):
+            def noise(image):
+                noise = tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=aug_percent, dtype=tf.float32)
+                return image + noise
+            image = noise(image)
+            return image, label
+
+        hard_ds = hard_ds.map(augment)
 
     #save one picture from each dataset
     easy_img = next(iter(easy_ds))[0]
@@ -124,30 +156,47 @@ def Build_Dataset(combined=True):
         return easy_ds, hard_ds,test_ds
     
 
-def Main(method_type="Sequential"):
-    max_epochs = 10
-    lr = 0.01
+def Main(config):
+    max_epochs = int(config["max_epochs"])
+    lr = float(config["lr"])
 
     #pull in the model
-    model = im.get_model("CNN3",(28,28,1), 10)
+    if config["dataset"] == "MNIST":
+        img_size = (28,28,1)
+        num_classes = 10
+    elif config["dataset"] == "CIFAR10":
+        img_size = (32,32,3)
+        num_classes = 10
+    else:
+        print("Invalid dataset")
+        
+    model = im.get_model(config["model"],img_size, num_classes)
     optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
     model.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
     wandb_callback = wandb.keras.WandbCallback(save_model=False)
 
     #pull in a dataset
-    if method_type == "Combined":
+    if config["type"] == "Combined":
         #Train on the full combined ds
-        dataset,easy_ds,hard_ds,test_ds = Build_Dataset(combined=True)
+        dataset,easy_ds,hard_ds,test_ds = Build_Dataset(combined=True, name=config["dataset"],aug_percent=float(config["aug_percent"]))
         model.fit(dataset, validation_data=test_ds ,epochs=max_epochs, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM",epoch_multiplier=2),CustomCallback(hard_ds,"Hard_FIM",epoch_multiplier=2)])
-    elif method_type == "Sequential":
+    elif config["type"] == "Sequential":
         #Train on the easy dataset first, then the hard dataset
-        easy_ds, hard_ds,test_ds = Build_Dataset(combined=False)
+        easy_ds, hard_ds,test_ds = Build_Dataset(combined=False, name=config["dataset"],aug_percent=float(config["aug_percent"]))
         model.fit(easy_ds, epochs=max_epochs,validation_data=test_ds, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
         model.fit(hard_ds, epochs=max_epochs*2,validation_data=test_ds, initial_epoch=max_epochs, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
-    elif method_type == "Additive":
+    elif config["type"] == "Easy":
+        #Train on the easy dataset only
+        easy_ds, hard_ds,test_ds = Build_Dataset(combined=False, name=config["dataset"],aug_percent=float(config["aug_percent"]))
+        model.fit(easy_ds, epochs=max_epochs*2,validation_data=test_ds, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
+    elif config["type"] == "Hard":
+        #Train on the hard dataset only
+        easy_ds, hard_ds,test_ds = Build_Dataset(combined=False, name=config["dataset"],aug_percent=float(config["aug_percent"]))
+        model.fit(hard_ds, epochs=max_epochs*2,validation_data=test_ds, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
+    elif config["type"] == "Additive":
         #Train on the easy dataset first, then the combined dataset
-        dataset,easy_ds,hard_ds,test_ds = Build_Dataset(combined=True)
+        dataset,easy_ds,hard_ds,test_ds = Build_Dataset(combined=True, name=config["dataset"],aug_percent=float(config["aug_percent"]))
         model.fit(easy_ds, epochs=max_epochs,validation_data=test_ds, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM"),CustomCallback(hard_ds,"Hard_FIM")])
         model.fit(dataset, epochs=max_epochs+(max_epochs//2+1),validation_data=test_ds, initial_epoch=max_epochs, callbacks=[wandb_callback,CustomCallback(easy_ds,"Easy_FIM",epoch_multiplier=2),CustomCallback(hard_ds,"Hard_FIM",epoch_multiplier=2)])
     else:
@@ -159,13 +208,15 @@ if __name__ == "__main__":
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
     wandb.login()
     config = {
-        "type":"Additive",
+        "type":"Hard",
         "model":"CNN3",
-        "dataset":"MNIST",
+        "dataset":"CIFAR10",
         "aug_percent":"0.2",
         "aug_test":"False",
+        "lr":"0.1",
+        "max_epochs":"30",
     }
     wandb.init(project="CL_FIM",config=config)
-    Main(method_type="Additive")
+    Main(config)
     print("done")
 
