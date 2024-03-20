@@ -106,6 +106,45 @@ def CNN5_Dense3(img_shape, num_classes):
     ])
     return model
 
+def CNN5_Dense4(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=img_shape),
+        tf.keras.layers.MaxPool2D((2,2)),
+        tf.keras.layers.Conv2D(64,3,activation='relu'),
+        tf.keras.layers.Conv2D(64,3,activation='relu'),
+        tf.keras.layers.MaxPool2D((2,2)),
+        tf.keras.layers.Conv2D(128,3,activation='relu'),
+        tf.keras.layers.MaxPool2D((2,2)),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
+def CNN5_Dense5(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=img_shape),
+        tf.keras.layers.MaxPool2D((2,2)),
+        tf.keras.layers.Conv2D(64,3,activation='relu'),
+        tf.keras.layers.Conv2D(64,3,activation='relu'),
+        tf.keras.layers.MaxPool2D((2,2)),
+        tf.keras.layers.Conv2D(128,3,activation='relu'),
+        tf.keras.layers.MaxPool2D((2,2)),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
 def CNN5_DenseL(img_shape, num_classes):
     model = tf.keras.Sequential([
         tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=img_shape),
@@ -283,6 +322,76 @@ def test_CNN(img_shape, num_classes):
     model.add(tf.keras.layers.Dense(10, activation='softmax'))
     return model
 
+def Dense1(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=img_shape),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
+def Dense1_256(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=img_shape),
+        tf.keras.layers.Dense(256,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
+def Dense1_512(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=img_shape),
+        tf.keras.layers.Dense(512,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
+def Dense1_1024(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=img_shape),
+        tf.keras.layers.Dense(1024,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
+def Dense1_2048(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=img_shape),
+        tf.keras.layers.Dense(2048,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
+def Dense2(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=img_shape),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
+def Dense3(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=img_shape),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
+def Dense4(img_shape, num_classes):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=img_shape),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(128,activation='relu'),
+        tf.keras.layers.Dense(num_classes,activation='softmax')
+    ])
+    return model
+
 
 def get_model(model_name,img_shape, num_classes):
     if model_name == "CNN3":            return CNN3(img_shape, num_classes)
@@ -292,6 +401,8 @@ def get_model(model_name,img_shape, num_classes):
     elif model_name == "CNN5_Dense1":   return CNN5_Dense1(img_shape, num_classes)
     elif model_name == "CNN5_Dense2":   return CNN5_Dense2(img_shape, num_classes)
     elif model_name == "CNN5_Dense3":   return CNN5_Dense3(img_shape, num_classes)
+    elif model_name == "CNN5_Dense4":   return CNN5_Dense4(img_shape, num_classes)
+    elif model_name == "CNN5_Dense5":   return CNN5_Dense5(img_shape, num_classes)
     elif model_name == "CNN5_DenseL":   return CNN5_DenseL(img_shape, num_classes)
     elif model_name == "CNN5_DenseXL":  return CNN5_DenseXL(img_shape, num_classes)
     elif model_name == "CNN5_DenseXXL": return CNN5_DenseXXL(img_shape, num_classes)
@@ -304,6 +415,14 @@ def get_model(model_name,img_shape, num_classes):
     elif model_name == "CNN11_NoPool":  return CNN11_NoPool(img_shape, num_classes)
     elif model_name == "CNN12":         return CNN12(img_shape, num_classes)
     elif model_name == "test_CNN":      return test_CNN()
+    elif model_name == "Dense1":        return Dense1(img_shape, num_classes)
+    elif model_name == "Dense1_256":    return Dense1_256(img_shape, num_classes)
+    elif model_name == "Dense1_512":    return Dense1_512(img_shape, num_classes)
+    elif model_name == "Dense1_1024":   return Dense1_1024(img_shape, num_classes)
+    elif model_name == "Dense1_2048":   return Dense1_2048(img_shape, num_classes)
+    elif model_name == "Dense2":        return Dense2(img_shape, num_classes)
+    elif model_name == "Dense3":        return Dense3(img_shape, num_classes)
+    elif model_name == "Dense4":        return Dense4(img_shape, num_classes)
     else: 
         print('Model not found')
         return None
