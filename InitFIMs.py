@@ -24,6 +24,16 @@ def get_ds(config):
             img_shape = (32,32,3)
         elif config['dataset'] == 'fmnist':
             img_shape = (28,28,1)
+        elif config['dataset'] == 'black1c':
+            img_shape = (28,28,1)
+        elif config['dataset'] == 'black10c':
+            img_shape = (28,28,1)
+        elif config['dataset'] == 'random':
+            img_shape = (28,28,1)
+        elif config['dataset'] == 'trandom':
+            img_shape = (28,28,1)
+        elif config['dataset'] == 'singlecolor':
+            img_shape = (28,28,1)
         else:
             print('Invalid Dataset')
 
@@ -46,6 +56,36 @@ def get_ds(config):
             (x_train, y_train), (x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
             num_classes = 10
             og_img_shape = (28,28,1)
+        elif base_ds_name == 'black1c':
+            x_train = np.zeros((config['FIM_data_count'],28,28,1))
+            y_train = np.zeros(config['FIM_data_count'])
+            num_classes = 10
+            og_img_shape = (28,28,1)
+        elif base_ds_name == 'black10c':
+            x_train = np.zeros((config['FIM_data_count'],28,28,1))
+            y_train = np.random.randint(0,10,config['FIM_data_count'])
+            num_classes = 10
+            og_img_shape = (28,28,1)
+        elif base_ds_name == 'random':
+            x_train = np.random.random((config['FIM_data_count'],28,28,1))*255
+            y_train = np.random.randint(0,10,config['FIM_data_count'])
+            num_classes = 10
+            og_img_shape = (28,28,1)
+        elif base_ds_name == 'trandom':
+            x_train = np.random.random((config['FIM_data_count'],img_shape[0],img_shape[1],img_shape[2]))*255
+            y_train = np.random.randint(0,10,config['FIM_data_count'])
+            num_classes = 10
+            og_img_shape = img_shape
+        elif base_ds_name == 'singlecolor':
+            #datasets of a single colour images
+            cols = np.linspace(0,255,10)
+            y_train = np.random.randint(0,10,config['FIM_data_count'])
+            x_train = np.zeros((config['FIM_data_count'],img_shape[0],img_shape[1],img_shape[2]))
+            for i in range(len(x_train)):
+                x_train[i] = cols[y_train[i]]
+
+            num_classes = 10
+            og_img_shape = (1,1,1)
         else:
             print('Invalid Dataset')
             return
@@ -66,6 +106,10 @@ def get_ds(config):
 
     #get the root dataset as tf ds
     train_ds,num_classes, og_img_shape = get_root_ds(config)
+    if base_ds_name in ['trandom']:
+        train_ds = train_ds.map(lambda x,y: (x / 255, y))
+        train_ds = train_ds.shuffle(config['FIM_data_count']).batch(1)
+        return train_ds,img_shape,num_classes
     def resize_map(x,y):
         return tf.image.resize(x,img_shape[:-1]),y
     #resize the images and normalise
@@ -134,10 +178,13 @@ def init_FIM(config):
 os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
 wandb.login()
 
-
+#ds names = mnist, cifar10, fmnist, black1c [all labels are 0], black10c [random labels],
+#           random [random images of 28,28,1 scaled],
+#           trandom [random images of provided size],
+#           singlecolor [images of a single colour]
 config = {
     'model_name':'Dense2',
-    'dataset':'fmnist_(14,14,1)',
+    'dataset':'singlecolor_(48,48,1)',
     'FIM_data_count':5000,
 }
 wandb.init(project="Init_FIM",config=config)
