@@ -5,49 +5,86 @@ import numpy as np
 import wandb
 import os
 import Init_Models as im
+import random
 
 
 
-COUNT = 20
+def get_ds(config):
+    #datasetname = "ds_name+_+img_shape"
+    #if config['dataset'] contains _ then split it
+    if '_' in config['dataset']:
+        base_ds_name = config['dataset'].split('_')[0]
+        img_shape = config['dataset'].split('_')[1]
+        img_shape = tuple([int(x) for x in img_shape[1:-1].split(',')])
+    else:
+        base_ds_name = config['dataset']
+        if config['dataset'] == 'mnist':
+            img_shape = (28,28,1)
+        elif config['dataset'] == 'cifar10':
+            img_shape = (32,32,3)
+        elif config['dataset'] == 'fmnist':
+            img_shape = (28,28,1)
+        else:
+            print('Invalid Dataset')
 
-Best_BS = 0
-Best_LR = 0
-Best_Val_Acc = 0
+    print('base_ds_name:',base_ds_name)
+    print('img_shape:',img_shape)
+    print(tuple(img_shape[:-1]))
 
+
+    #setup data 
+    def get_root_ds(config):
+        if base_ds_name == 'mnist':
+            (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+            num_classes = 10
+            og_img_shape = (28,28,1)
+        elif base_ds_name == 'cifar10':
+            (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+            num_classes = 10
+            og_img_shape = (32,32,3)
+        elif base_ds_name == 'fmnist':
+            (x_train, y_train), (x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
+            num_classes = 10
+            og_img_shape = (28,28,1)
+        else:
+            print('Invalid Dataset')
+            return
+
+        bool_list = [True]*config['FIM_data_count'] + [False]*(len(x_train)-config['FIM_data_count'])
+        random.shuffle(bool_list)
+        x_train = x_train[bool_list]
+        y_train = y_train[bool_list]
+        #convert to tfds
+        x_train = tf.convert_to_tensor(x_train, dtype=tf.float32)
+        if base_ds_name in ['mnist','fmnist']:
+            x_train = tf.expand_dims(x_train, axis=-1)
+        y_train = tf.convert_to_tensor(y_train, dtype=tf.int64)
+
+        #build the datasets
+        train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        return train_ds,num_classes,og_img_shape
+
+    #get the root dataset as tf ds
+    train_ds,num_classes, og_img_shape = get_root_ds(config)
+    def resize_map(x,y):
+        return tf.image.resize(x,img_shape[:-1]),y
+    #resize the images and normalise
+    train_ds= train_ds.map(resize_map)
+    if og_img_shape[2] != 1 and img_shape[2] == 1:
+        train_ds = train_ds.map(lambda x,y: (tf.image.rgb_to_grayscale(x),y))
+    train_ds = train_ds.map(lambda x,y: (x / 255, y))
+    train_ds = train_ds.shuffle(config['FIM_data_count']).batch(1)
+    return train_ds,img_shape,num_classes
 
 def init_FIM(config):
-    global Best_BS
-    global Best_LR
+
     #clear tf session
     tf.keras.backend.clear_session()
     
-    #setup data 
-    if config['dataset'] == 'mnist':
-        #get mnist data from tfds
-        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
-        #convert to tfds
-        x_train = tf.convert_to_tensor(x_train, dtype=tf.float32)
-        y_train = tf.convert_to_tensor(y_train, dtype=tf.int64)
-
-        #noramlise and build the datasets
-        train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train)).map(lambda x, y: (x / 255, y))
-        train_ds = train_ds.shuffle(60000).batch(1)
-    elif config['dataset'] == 'cifar10':
-        #get cifar10 data from tfds
-        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
-        #convert to tfds
-        x_train = tf.convert_to_tensor(x_train, dtype=tf.float32)
-        y_train = tf.convert_to_tensor(y_train, dtype=tf.int64)
-
-        #noramlise and build the datasets
-        train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train)).map(lambda x, y: (x / 255, y))
-        train_ds = train_ds.shuffle(60000).batch(1)
-    else:
-        print('Invalid Dataset')
-        return
+    train_ds,img_shape,num_classes = get_ds(config)
 
     #pull model from seperate file
-    model = im.get_model(config['model_name'],(28,28,1),10)
+    model = im.get_model(config['model_name'],img_shape,num_classes)
 
     #compile the model
     optimizer = tf.keras.optimizers.SGD(learning_rate=0.1)
@@ -100,7 +137,7 @@ wandb.login()
 
 config = {
     'model_name':'Dense2',
-    'dataset':'mnist',
+    'dataset':'fmnist_(14,14,1)',
     'FIM_data_count':5000,
 }
 wandb.init(project="Init_FIM",config=config)
