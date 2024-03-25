@@ -184,7 +184,7 @@ wandb.login()
 #           singlecolor [images of a single colour]
 config = {
     'model_name':'Dense2',
-    'dataset':'singlecolor_(48,48,1)',
+    'dataset':'mnist_(70,70,1)',
     'FIM_data_count':5000,
 }
 wandb.init(project="Init_FIM",config=config)
