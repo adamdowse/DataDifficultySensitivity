@@ -79,31 +79,57 @@ def calc_d2zdw2(ds,model,limit=None):
         print([d.shape for d in d2zdw2])
         pnt()
 
-def calc_NME(ds,model,limit=None):
+def calc_R(ds,model,limit=None):
     #calcs trace of the NME matrix (the residual part of gauss-newton)
-    print('Calculating NME')
+    print('Calculating R term')
     t = time.time()
+    mean = 0
+    count = 0
     if limit == None:
         limit = ds.train_count
         print("NME limit not specified, using ",ds.train_count," data points")
     for i in range(limit//ds.batch_size):
         items = ds.get_batch()
-        NME = model.Get_NME(items)
-        print([n.shape for n in NME])
-        pnt()
+        R = model.Get_R(items)
+        count += 1
+        delta = R - mean
+        mean += delta/count
+    print('--> time: ',time.time()-t)
+    return mean
+        
+        
 
 def calc_G(ds,model,limit=None):
     #calcs trace of the G matrix (the non residual part of gauss-newton)
     print('Calculating G')
     t = time.time()
+    G_mean = 0
+    S_mean = 0
+    dzdt2_mean = 0
+    count = 0
+
     if limit == None:
         limit = ds.train_count
         print("G limit not specified, using ",ds.train_count," data points")
     for i in range(limit//ds.batch_size):
         items = ds.get_batch()
-        G = model.Get_G(items)
-        print([n.shape for n in NME])
-        pnt()
+        metrics = model.Get_G(items)
+        
+        count += 1
+        deltaG = metrics[0] - G_mean
+        G_mean += deltaG/count
+
+        deltaS = metrics[1] - S_mean
+        S_mean += deltaS/count
+
+        deltaD = metrics[2] - dzdt2_mean
+        dzdt2_mean += deltaD/count
+    
+    print('--> time: ',time.time()-t)
+    return [G_mean,S_mean,dzdt2_mean]
+
+
+        
 
 
 def calc_dist_FIM(ds,model,FIM_bs,limit=None):

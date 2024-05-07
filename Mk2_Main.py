@@ -13,10 +13,20 @@ import Mk2_Funcs as FC
 
 
 
-def compute_metrics(data,model,epoch,FIM_bs=5,limit=None):
+def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 
     model.remove_softmax()
-    G = FC.calc_G(data,model,limit=limit)
+    print(model.model.summary())
+    #compute R
+    R = FC.calc_R(data,model,limit=limit)
+    wandb.log({'R_matrix_trace':R},step=epoch)
+
+    [G_mean,S_mean,dzdt2_mean] = FC.calc_G(data,model,limit=limit)
+    wandb.log({'G_matrix_trace':G_mean},step=epoch)
+    wandb.log({'S_matrix_trace':S_mean},step=epoch)
+    wandb.log({'dzdt2_matrix_trace':dzdt2_mean},step=epoch)
+
+    wandb.log({'FullH_matrix_trace':G_mean+R},step=epoch)
     #D = FC.calc_d2zdw2(data,model,limit=limit)
     model.add_softmax()
 
@@ -26,23 +36,23 @@ def compute_metrics(data,model,epoch,FIM_bs=5,limit=None):
     loss_spectrum = FC.calc_train_loss_spectrum(data,model,limit=limit)
     wandb.log({'loss_spectrum':loss_spectrum},step=epoch)
 
-    #S matrix
-    S = FC.calc_S(data,model,limit=limit)
-    print('S matrix trace: ',S)
-    wandb.log({'S_matrix_trace':S},step=epoch)
+    # #S matrix
+    # S = FC.calc_S(data,model,limit=limit)
+    # print('S matrix trace: ',S)
+    # wandb.log({'S_matrix_trace':S},step=epoch)
 
-    #F matrix
-    F = FC.calc_FIM(data,model,FIM_bs,limit=limit)
-    print('F matrix trace: ',F)
-    wandb.log({'F_matrix_trace':F},step=epoch)
+    # #F matrix
+    # F = FC.calc_FIM(data,model,FIM_bs,limit=limit)
+    # print('F matrix trace: ',F)
+    # wandb.log({'F_matrix_trace':F},step=epoch)
 
-    #Residuals matrix
-    R = FC.calc_residuals(data,model,limit=limit)
-    print('Residuals: ',R)
-    wandb.log({'Residuals':R},step=epoch)
+    # #Residuals matrix
+    # R = FC.calc_residuals(data,model,limit=limit)
+    # print('Residuals: ',R)
+    # wandb.log({'Residuals':R},step=epoch)
 
-    #d2zdw2 matrix
-    d2zdw2 = FC.calc_d2zdw2(data,model,limit=limit)
+    # #d2zdw2 matrix
+    # d2zdw2 = FC.calc_d2zdw2(data,model,limit=limit)
 
 
 
