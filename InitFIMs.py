@@ -199,8 +199,6 @@ def get_ds(config):
             return x,y
         train_ds = train_ds.map(random_label_aug)
     
-
-
     train_ds = train_ds.shuffle(config['FIM_data_count']).batch(1)
     return train_ds,img_shape,num_classes
 
@@ -215,7 +213,7 @@ def init_FIM(config):
     model = im.get_model(config['model_name'],img_shape,num_classes)
 
     #compile the model
-    optimizer = tf.keras.optimizers.SGD(learning_rate=0.1)
+    optimizer = tf.keras.optimizers.SGD(learning_rate=config['learning_rate'])
     model.compile(
         optimizer=optimizer,
         loss='sparse_categorical_crossentropy',
@@ -239,7 +237,25 @@ def init_FIM(config):
         g = tf.reduce_sum(g)
         return g
 
-    def record_GFIM(ds,model):
+    def Get_tr_div_norm_Z(item):
+        img,label = item
+        with tf.GradientTape() as tape:
+            y_hat = model(img,training=False) #[0.1,0.8,0.1,ect] this is output of softmax
+            output = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #[2]
+            #output = tf.gather(y_hat,selected,axis=1,batch_dims=1)
+            output = tf.gather(y_hat,output,axis=1) #[0.3]
+            output = tf.squeeze(output)
+            output = tf.math.log(output)
+        g = tape.gradient(output,model.trainable_variables)#This or Jacobian?
+        
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in model.trainable_variables]
+        g = [tf.reshape(g[i],(layer_sizes[i])) for i in range(len(g))] #TODO check that this dosent need to deal with batches
+        g = tf.concat(g,axis=0)
+        g = tf.square(g)
+        g = tf.reduce_sum(g)
+        return g
+
+    def record_GFIM(ds,model,e):
         print('recording GFIM')
         data_count = 0
         mean = 0
@@ -252,7 +268,7 @@ def init_FIM(config):
             x = Get_Z_single(next(iter_ds)) #just one replica can be used here
             delta = x - mean 
             mean += delta/(data_count)
-        wandb.log({'FIM':mean},step=0)
+        wandb.log({'FIM':mean},step=e)
         return
 
     def Get_g(item):
@@ -286,7 +302,7 @@ def init_FIM(config):
         g = [tf.reduce_sum(i) for i in g]
         return g # returns a vector of gradients
 
-    def record_LFIM(ds,model):
+    def record_LFIM(ds,model,e):
         data_count = 0
         iter_ds = iter(ds)
         low_lim = config['FIM_data_count']
@@ -300,10 +316,10 @@ def init_FIM(config):
             delta = [x - mean for x,mean in zip(x,mean)]
             mean = [d/data_count + m for d,m in zip(delta,mean)]
         for i in range(len(mean)):
-            wandb.log({'LFIM_'+str(i):mean[i]},step=0)
+            wandb.log({'LFIM_'+str(i):mean[i]},step=e)
         return
 
-    def record_gradient_alignmentandmag(ds,model):
+    def record_gradient_alignmentandmag(ds,model,e):
         data_count = 0
         alignmean = 0
         magmean = 0
@@ -326,9 +342,32 @@ def init_FIM(config):
                 past_g = g
             else:
                 past_g = Get_g(next(iter_ds))
-        wandb.log({'Alignment':alignmean},step=0)
-        wandb.log({'SMagnitude':magmean},step=0)
+        wandb.log({'Alignment':alignmean},step=e)
+        wandb.log({'SMagnitude':magmean},step=e)
 
+    def Get_single_logit(item):
+        img,label = item
+        with tf.GradientTape() as tape:
+            y_hat = model(img,training=False)
+            y_hat = tf.gather(y_hat,label,axis=1,batch_dims=1)
+            y_hat = tf.squeeze(y_hat) #softmax output
+        return y_hat
+
+    def record_logit_variance(ds,model,e):
+        data_count = 0
+        sum_o = 0
+        sum_o2 = 0
+        iter_ds = iter(ds)
+        low_lim = config['FIM_data_count']
+        for _ in range(low_lim):
+            data_count += 1
+            if data_count % 500 == 0:
+                print(data_count)
+            x = Get_single_logit(next(iter_ds))
+            sum_o += x
+            sum_o2 += x**2
+        mean = sum_o/data_count
+        wandb.log({'SMVar':(sum_o2 - mean**2)/(data_count-1)},step=e)
 
     def record_single_image():
         #record the first image to wandb
@@ -339,10 +378,19 @@ def init_FIM(config):
     #record the initial FIM
     if False:
         record_single_image()
-    record_LFIM(train_ds,model)
 
-    record_GFIM(train_ds,model)
-    record_gradient_alignmentandmag(train_ds,model)
+    for e in range(config['epochs']):
+        print('Epoch:',e)
+        if e > 0:
+            train_ds = train_ds.unbatch()
+            train_ds = train_ds.shuffle(config['FIM_data_count'])
+            train_ds = train_ds.batch(config['batch_size'])
+            model.fit(train_ds,epochs=1,callbacks=[wandb.keras.WandbCallback(save_model=False)])
+            train_ds = train_ds.unbatch().batch(1)
+        record_GFIM(train_ds,model,e)
+        record_LFIM(train_ds,model,e)
+        #record_gradient_alignmentandmag(train_ds,model,e)
+        record_logit_variance(train_ds,model,e)
     return 
 
 os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
@@ -357,8 +405,11 @@ wandb.login()
 #"R(random_img_aug_percent)_RL(random_label_aug_percent)_C(class_limiter)"
 config = {
     'model_name':'Dense2',
-    'dataset':'cifar10_(28,28,1)',
-    'FIM_data_count':5000,
+    'dataset':'mnist_(5,5,1)',
+    'FIM_data_count':1500,
+    'epochs':20,
+    'learning_rate':0.01,
+    'batch_size':8
 }
 wandb.init(project="Init_LFIM",config=config)
 
