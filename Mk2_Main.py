@@ -15,7 +15,10 @@ import Mk2_Funcs as FC
 
 def compute_metrics(data,model,epoch,FIM_bs=5,limit=None):
 
-    D = FC.calc_d2zdw2(data,model,limit=limit)
+    model.remove_softmax()
+    G = FC.calc_G(data,model,limit=limit)
+    #D = FC.calc_d2zdw2(data,model,limit=limit)
+    model.add_softmax()
 
 
     #Compute the metrics
@@ -48,7 +51,7 @@ def compute_metrics(data,model,epoch,FIM_bs=5,limit=None):
 #main run file
 def main():
     #load data
-    data = DataClass.Data('mnist',32,split=[0.8,0.2,0])
+    data = DataClass.Data('mnist',10,split=[0.8,0.2,0])
     data.build_data_in_mem()
 
     #build model
@@ -66,7 +69,7 @@ def main():
     strategy = None
     model = ModelClass.Models(config,strategy)
 
-    data.build_train_iter()
+    data.build_train_iter(bs=1)
     compute_metrics(data,model,epoch=0,FIM_bs=5,limit=1000)
     
 

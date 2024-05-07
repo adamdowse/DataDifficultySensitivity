@@ -377,7 +377,8 @@ class Models():
                 tf.keras.layers.MaxPool2D(),
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+                tf.keras.layers.Dense(self.num_classes, kernel_initializer=initialiser),
+                tf.keras.layers.Softmax()
             ])
             self.output_is_logits = False
             self.new_img_size = self.img_shape
@@ -999,9 +1000,54 @@ class Models():
         j = tf.reduce_sum(j) #sum the jacobian [BS x 1]
         return j 
 
-    def model_remove_softmax(self):
+    def Get_G(self,items):
+        #This is the full first Gauss newton matrix (representing the FIM) for cat cross entropy
+        #(s_j {i=j} - s_j s_i) dz/dtheta_i dz/dtheta_j and totals [num_params x num_params]
+        #S x dz x dz
+        #model should not have softmax
+        #batch size should be 1 (for now)
+        print(self.model.summary())
+        imgs,labels = items
+        bs = tf.shape(imgs)[0]
+        with tf.GradientTape() as tape:
+            z = tf.squeeze(self.model(imgs,training=False)) #get the output [num_classes]
+            s = tf.squeeze(tf.nn.softmax(z)) #get the softmax output [num_classes]
+
+        num_classes = tf.shape(z)[0]
+    
+        #S
+        S = s[:,None]*s[None,:]
+        S = tf.linalg.set_diag(S,s*(1-s))
+        print(S)
+        
+        #dz/dtheta [Might be able to do this faster with tf.einsum]
+        dzdt = tape.jacobian(z,self.model.trainable_variables) #[layers x (classes x sublayerparams)]
+        dzdt = [tf.reshape(l,[num_classes,-1]) for l in dzdt] #[layers x (classes x layerparams)]
+        dzdt = tf.concat(dzdt,axis=1) #[classes x params]
+        print(dzdt.shape)
+        pnt()
+
+
+        
+        pnt()
+        grads = tf.concat(grads,axis=1) #concat the grads over the layers [1 x num_params]
+        #S x dz/dtheta
+        G = tf.tensordot(S,grads,axes=1) #multiply S by dz/dtheta [num_params x 1]
+        #dz/dtheta x S x dz/dtheta
+        G = tf.tensordot(grads,G,axes=1) #multiply dz/dtheta by S x dz/dtheta [num_params x num_params]
+        return tf.linalg.trace(G),tf.linalg.trace(S)
+
+        
+        
+            
+
+    def remove_softmax(self):
         self.model = tf.keras.Model(inputs=self.model.inputs,outputs=self.model.layers[-2].output)
         self.output_is_logits = True
+    
+    def add_softmax(self):
+        self.model = tf.keras.Sequential([self.model,tf.keras.layers.Softmax()])
+        self.output_is_logits = False
 
     @tf.function
     def Get_H(self,items):
@@ -1010,13 +1056,26 @@ class Models():
         with tf.GradientTape(persistent=True) as tape2:
             with tf.GradientTape() as tape1:
                 y_hat = self.model(imgs,training=False)
-            grads = tape1.gradient(y_hat,self.model.trainable_variables) #[BS x num_classes x num_params]
-            grads = grads[0:2]
-            
-        hessians = [tape2.jacobian(g, v) for g, v in zip(grads, self.model.trainable_variables[0:2])]
+            grads = tape1.gradient(y_hat,self.model.trainable_variables) #[(layerparams)x layers] sums across batch
+
+        hessians = [tape2.jacobian(g, v) for g, v in zip(grads, self.model.trainable_variables)]
         del tape2
         return hessians
 
+    @tf.function
+    def Get_NME(self,items):
+        #this is (S-Y)d2w/d2theta
+        #model should not have softmax
+        imgs,labels = items
+        bs = tf.shape(imgs)[0]
+        with tf.GradientTape(persistent=True) as tape2:
+            with tf.GradientTape() as tape1:
+                z = self.model(imgs,training=False)
+                s = tf.nn.softmax(z)
+                Y = tf.one_hot(tf.argmax(y_hat,1),self.num_classes) #one hot the output [BS x num_classes]
+                S = y_hat - Y #get the residual [BS x num_classes]
+            grads = tape1.gradient(y_hat,self.model.trainable_variables) #[(layerparams)x layers] sums across batch
+            grads = tape1.gradient(y_hat,self.model.trainable_variables)
 
     @tf.function
     def get_residuals(self,items):
