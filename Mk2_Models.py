@@ -68,27 +68,30 @@ class Models():
         print('INIT: Loss: ',self.config['loss_func'])
         #this needs to define the loss function
         #TODO add more loss functions
-        if self.strategy != None:
-            with self.strategy.scope():
-                if self.config['loss_func'] == 'categorical_crossentropy' and self.config['acc_sample_weight'] == None:
-                    #self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config['label_smoothing'])
-                    self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config['label_smoothing'],reduction=tf.keras.losses.Reduction.NONE)
-                elif self.config['loss_func'] == 'categorical_crossentropy':
-                    #weighted categorical crossentropy
-                    #self.loss_func = WeightedCategoricalCrossentropy(self.config['acc_sample_weight'],reduction=tf.keras.losses.Reduction.AUTO,label_smoothing=self.config['label_smoothing'],from_logits=self.output_is_logits)
-                    self.loss_func = custom_losses.WeightedCategoricalCrossentropy(self.config['acc_sample_weight'],reduction=tf.keras.losses.Reduction.NONE,label_smoothing=self.config['label_smoothing'],from_logits=self.output_is_logits)
-                else:
-                    print('Loss not recognised')
-        else:
-            if self.config['loss_func'] == 'categorical_crossentropy' and self.config['acc_sample_weight'] == None:
-                #self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config['label_smoothing'])
-                self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config['label_smoothing'],reduction=tf.keras.losses.Reduction.NONE)
-            elif self.config['loss_func'] == 'categorical_crossentropy':
-                #weighted categorical crossentropy
-                #self.loss_func = WeightedCategoricalCrossentropy(self.config['acc_sample_weight'],reduction=tf.keras.losses.Reduction.AUTO,label_smoothing=self.config['label_smoothing'],from_logits=self.output_is_logits)
-                self.loss_func = custom_losses.WeightedCategoricalCrossentropy(self.config['acc_sample_weight'],reduction=tf.keras.losses.Reduction.NONE,label_smoothing=self.config['label_smoothing'],from_logits=self.output_is_logits)
-            else:
-                print('Loss not recognised')
+        self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits)
+        # if self.strategy != None:
+        #     with self.strategy.scope():
+        #         if self.config['loss_func'] == 'categorical_crossentropy' and self.config['acc_sample_weight'] == None:
+        #             #self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config['label_smoothing'])
+        #             self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits)
+        #             self.loss_func_nored = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,reduction=tf.keras.losses.Reduction.NONE)
+        #         elif self.config['loss_func'] == 'categorical_crossentropy':
+        #             #weighted categorical crossentropy
+        #             #self.loss_func = WeightedCategoricalCrossentropy(self.config['acc_sample_weight'],reduction=tf.keras.losses.Reduction.AUTO,label_smoothing=self.config['label_smoothing'],from_logits=self.output_is_logits)
+        #             self.loss_func = custom_losses.WeightedCategoricalCrossentropy(self.config['acc_sample_weight'],reduction=tf.keras.losses.Reduction.NONE,label_smoothing=self.config['label_smoothing'],from_logits=self.output_is_logits)
+        #         else:
+        #             print('Loss not recognised')
+        # else:
+        #     if self.config['loss_func'] == 'categorical_crossentropy' and self.config['acc_sample_weight'] == None:
+        #         #self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config['label_smoothing'])
+        #         self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,label_smoothing=self.config['label_smoothing'])
+        #         self.loss_func_nored = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits,reduction=tf.keras.losses.Reduction.NONE)
+        #     elif self.config['loss_func'] == 'categorical_crossentropy':
+        #         #weighted categorical crossentropy
+        #         #self.loss_func = WeightedCategoricalCrossentropy(self.config['acc_sample_weight'],reduction=tf.keras.losses.Reduction.AUTO,label_smoothing=self.config['label_smoothing'],from_logits=self.output_is_logits)
+        #         self.loss_func = custom_losses.WeightedCategoricalCrossentropy(self.config['acc_sample_weight'],reduction=tf.keras.losses.Reduction.NONE,label_smoothing=self.config['label_smoothing'],from_logits=self.output_is_logits)
+        #     else:
+        #         print('Loss not recognised')
 
 
     def metrics_init(self):
@@ -916,7 +919,7 @@ class Models():
             self.pre_process_func = efficientnet_preprocess_input
         else:
             print('Model not recognised')
-
+        print('Model built with shape:',self.new_img_size+(1,))
         self.model.build(input_shape=self.new_img_size + (1,))
     
     def count_params(self):
@@ -926,7 +929,7 @@ class Models():
         return trainable_params
 
     def model_compile(self):
-        self.model.summary()
+        #self.model.summary()
         self.model.compile(optimizer=self.optimizer,loss=self.loss_func)
         #wandb.log({'Model':self.count_params()},step=0)
         
@@ -949,12 +952,12 @@ class Models():
     def epoch_init(self):
         #this is called at the start of each epoch
         #Reset the metrics at the start of the next epoch
-        #self.train_loss_metric.reset_states()
+        self.train_loss_metric.reset_states()
         self.train_acc_metric.reset_states()
         self.train_prec_metric.reset_states()
         self.train_rec_metric.reset_states()
 
-        #self.test_loss_metric.reset_states()
+        self.test_loss_metric.reset_states()
         self.test_acc_metric.reset_states()
         self.test_prec_metric.reset_states()
         self.test_rec_metric.reset_states()
@@ -1007,13 +1010,12 @@ class Models():
         #S x dz x dz
         #model should not have softmax
         #batch size should be 1 (for now)
-        print(self.model.summary())
+
         imgs,labels = items
         bs = tf.shape(imgs)[0]
-        with tf.GradientTape() as tape:
-            z = tf.squeeze(self.model(imgs,training=False)) #get the output [num_classes]
+        with tf.GradientTape() as tape1:
+            z = tf.squeeze(self.model_nosm(imgs,training=False)) #get the output [num_classes]
             s = tf.squeeze(tf.nn.softmax(z)) #get the softmax output [num_classes]
-
         num_classes = tf.shape(z)[0]
     
         #S
@@ -1021,7 +1023,7 @@ class Models():
         S = tf.linalg.set_diag(S,s*(1-s)) #[num_classes x num_classes]
         
         #dz/dtheta [Might be able to do this faster with tf.einsum]
-        dzdt = tape.jacobian(z,self.model.trainable_variables) #[layers x (classes x sublayerparams)]
+        dzdt = tape1.jacobian(z,self.model_nosm.trainable_variables) #[layers x (classes x sublayerparams)]
         dzdt = [tf.reshape(l,[num_classes,-1]) for l in dzdt] #[layers x (classes x layerparams)]
         dzdt = tf.concat(dzdt,axis=1) #[classes x params]
 
@@ -1035,7 +1037,7 @@ class Models():
         #tr(dzdtT x ST x dzdt)
         trG = tf.einsum('id,dc,ci->',tf.transpose(dzdt),tf.transpose(S),dzdt)
         trdzdt2 = tf.einsum('ic,ci->',tf.transpose(dzdt),dzdt)
-
+        del tape1
         return [trG,trS,trdzdt2]
 
     @tf.function
@@ -1049,13 +1051,14 @@ class Models():
         with tf.GradientTape() as tape:
             z = tf.squeeze(self.model(imgs,training=False))
             s = tf.squeeze(tf.nn.softmax(z))
-        Y = tf.one_hot(tf.argmax(labels,1),self.num_classes) #one hot the output [num_classes]
+        #Y = tf.one_hot(tf.argmax(labels,1),self.num_classes) #one hot the output [num_classes]
+        Y = labels
         S = s - Y #get the residual [num_classes]
 
         C = 0
         theta = [tf.reshape(l,[-1]) for l in self.model.trainable_variables] #flatten the model params [layers x layerparams]
-        print(self.model.trainable_variables)
-        print(len(theta))
+        #print(self.model.trainable_variables)
+        #print(len(theta))
         for l in range(len(theta)-2): #sum over layers apart from the last w and b where jacobain is none
             with tf.GradientTape(persistent=True) as tape1:
                 with tf.GradientTape() as tape:
@@ -1063,21 +1066,23 @@ class Models():
                 # Compute first derivative
                 dy_dtheta = tape.jacobian(z, self.model.trainable_variables[l]) # [num_classes x layerparams]
             l_shape = tf.shape(self.model.trainable_variables[l])
-            print(l)
-            print(self.model.trainable_variables[l])
-            print(l_shape)
+            #print(l)
+            #print(self.model.trainable_variables[l])
+            #print(l_shape)
             l_shape = tf.reduce_prod(l_shape)
-            print(l_shape)
-            print(dy_dtheta)
+            #print(l_shape)
+            #print(dy_dtheta)
             # Compute second derivative and add to trace
             d2 = tape1.jacobian(dy_dtheta, self.model.trainable_variables[l]) # [num_classes x layerparams x layerparams]
-            print(d2)
+            #print(d2)
             d2 = tf.reshape(d2, [self.num_classes, l_shape, l_shape])
             d2 = tf.tensordot(S, d2, axes=1) # [layerparams x layerparams]
+            #C += tf.einsum('c,cii->', S, d2)
 
             C += tf.linalg.trace(d2)
             del tape1
-            print(C)
+            
+            #print(C)
         return C
 
 
@@ -1093,9 +1098,9 @@ class Models():
         d2z = tf.gradients(tf.gradients(zc,theta_i),theta_i)[0]
 
 
-    def remove_softmax(self):
-        self.model = tf.keras.Model(inputs=self.model.inputs,outputs=self.model.layers[-2].output)
-        self.output_is_logits = True
+    def make_softmax_model(self):
+        self.model_nosm = tf.keras.Model(inputs=self.model.inputs,outputs=self.model.layers[-2].output)
+        #self.output_is_logits = True
     
     def add_softmax(self):
         self.model = tf.keras.Sequential([self.model,tf.keras.layers.Softmax()])
@@ -1111,7 +1116,7 @@ class Models():
             grads = tape1.gradient(y_hat,self.model.trainable_variables) #[(layerparams)x layers] sums across batch
 
         hessians = [tape2.jacobian(g, v) for g, v in zip(grads, self.model.trainable_variables)]
-        del tape2
+        
         return hessians
 
     @tf.function
@@ -1137,7 +1142,39 @@ class Models():
             r = softmax - labels # [BS x num_classes]
         return r
 
+    # @tf.function
+    # def train_step(self,data_inputs):
+    #     imgs,labels = data_inputs
+    #     with tf.GradientTape() as tape:
+    #         preds = self.model(imgs,training=True)
+    #         loss = self.loss_func(labels,preds)
+    #     grads = tape.gradient(loss,self.model.trainable_variables)
+    #     self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
+    #     self.train_loss_metric.update_state(loss)
+    #     self.train_acc_metric.update_state(labels,preds)
+    #     self.train_prec_metric.update_state(labels,preds)
+    #     self.train_rec_metric.update_state(labels,preds)
 
+    def train_epochs(self,data,epochs,current_epoch):
+        data.build_train_iter(bs=32,shuffle=True)
+        data.build_test_iter(bs=32,shuffle=False)
+        for epoch in range(epochs):
+            #self.epoch_init()
+            l = 0
+            for batch in range(data.train_batches):
+                items = data.get_batch(ds_type='train')
+                print(items)
+                l +=self.train_step(items)
+            wandb.log({'train_loss':l/data.train_batches},step=current_epoch+epoch)
+
+            l =0
+            for batch in range(data.test_batches):
+                items = data.get_batch(ds_type='test')
+                self.test_step(items)
+            wandb.log({'test_loss':l/data.test_batches},step=current_epoch+epoch)
+            #self.log_metrics(self.train_loss_metric.result(),self.test_loss_metric.result(),current_epoch+epoch)
+            # if self.early_stop(epoch):
+            #     break
 
 
 
@@ -1187,10 +1224,11 @@ class Models():
         grads = tape.gradient(loss,self.model.trainable_variables,)
         self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
         #self.train_loss_metric.update_state(loss)
-        self.train_acc_metric.update_state(labels,preds)
-        self.train_prec_metric.update_state(labels,preds)
-        self.train_rec_metric.update_state(labels,preds)
+        #self.train_acc_metric.update_state(labels,preds)
+        #self.train_prec_metric.update_state(labels,preds)
+        #self.train_rec_metric.update_state(labels,preds)
         return loss
+        
 
     @tf.function
     def test_step(self,items):
@@ -1199,11 +1237,12 @@ class Models():
             preds = self.model(imgs,training=False)
             loss = self.loss_func(labels,preds)
             loss = tf.nn.compute_average_loss(loss)
-        self.test_acc_metric.update_state(labels,preds)
-        self.test_prec_metric.update_state(labels,preds)
-        self.test_rec_metric.update_state(labels,preds)
+        #self.test_acc_metric.update_state(labels,preds)
+        #self.test_prec_metric.update_state(labels,preds)
+        #self.test_rec_metric.update_state(labels,preds)
         #self.test_loss_metric.update_state(loss)
-        return loss
+        return  loss
+        
 
     @tf.function
     def distributed_get_loss_step(self,data_inputs):

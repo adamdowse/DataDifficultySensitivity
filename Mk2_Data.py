@@ -88,9 +88,13 @@ class Data():
         self.data_dir = data_dir    #directory of the dataset, or None if not needed
 
         self.batch_size = batch_size    #batch size for the data
-        self.current_train_batch_size = None    #current batch size for the data
-        self.current_test_batch_size = None    #current batch size for the data
+        self.current_train_batch_size = 0    #current batch size for the data
+        self.current_test_batch_size = 0    #current batch size for the data
         self.current_val_batch_size = None    #current batch size for the data
+
+        self.train_batches = None    #number of batches in the dataset
+        self.test_batches = None    #number of batches in the dataset
+
 
 
     
@@ -171,6 +175,10 @@ class Data():
             else:
                 print('Val count is larger than dataset size so original size is used')
 
+        #map y to one hot
+        self.y_train = tf.one_hot(self.y_train,self.num_classes)
+        self.y_test = tf.one_hot(self.y_test,self.num_classes)
+
         #Convert to tf dataset
         self.train_data = tf.data.Dataset.from_tensor_slices((self.x_train, self.y_train))
         self.test_data = tf.data.Dataset.from_tensor_slices((self.x_test, self.y_test))
@@ -205,6 +213,8 @@ class Data():
                 self.train_data = self.train_data.unbatch()
                 self.train_data = self.train_data.batch(bs)
                 self.current_train_batch_size = bs
+                print('Batch size updated to: ',bs)
+        self.train_batches = self.train_count//bs
         self.iter_train = iter(self.train_data)
 
     def build_test_iter(self,shuffle=False,bs=None):
@@ -217,6 +227,7 @@ class Data():
                 self.test_data = self.test_data.unbatch()
                 self.test_data = self.test_data.batch(bs)
                 self.current_test_batch_size = bs
+        self.test_batches = self.test_count//bs
         self.iter_test = iter(self.test_data)
 
     def build_val_iter(self,shuffle=False,bs=None):

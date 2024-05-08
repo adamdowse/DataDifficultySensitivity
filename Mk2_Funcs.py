@@ -4,6 +4,7 @@
 
 import time
 import tensorflow as tf
+import numpy as np
 
 
 
@@ -20,9 +21,9 @@ def calc_train_loss_spectrum(dataset,model,limit=None):
         count = dataset.train_count
 
     loss_spectrum = np.zeros((count,1))
-    for i in range(count//dataset.batch_size):
+    for i in range(count//dataset.current_train_batch_size):
         imgs,labels = dataset.get_batch()
-        loss_spectrum[i*dataset.batch_size:(i+1)*dataset.batch_size-1] = model.get_batch_loss(imgs,labels)
+        loss_spectrum[i*dataset.current_train_batch_size:(i+1)*dataset.current_train_batch_size-1] = model.get_batch_loss(imgs,labels)
     print('--> time: ',time.time()-t)
     return loss_spectrum
 
@@ -37,10 +38,10 @@ def calc_S(ds,model,limit=None):
         count = limit
     else:
         count = ds.train_count
-    for i in range(count//ds.batch_size):
+    for i in range(count//ds.current_train_batch_size):
         imgs,labels = ds.get_batch()
         softmax_out = model.get_softmax(imgs)
-        for i in range(ds.batch_size):
+        for i in range(ds.current_train_batch_size):
             for j in range(ds.num_classes):
                 S += (softmax_out[j] - softmax_out[j])**2
     print('--> time: ',time.time()-t)
@@ -53,15 +54,15 @@ def calc_residuals(ds,model,limit=None):
     t = time.time()
     residuals = np.zeros((ds.num_classes,1))
     c = 0
-    ds.build_train_iter(bs=ds.batch_size)
+    ds.build_train_iter(bs=ds.current_train_batch_size)
     if limit == None:
         count = ds.train_count
         print("Residuals limit not specified, using ",ds.train_count," data points")
-    for i in range(count//ds.batch_size):
+    for i in range(count//ds.current_train_batch_size):
         imgs,labels = ds.get_batch()
         r = model.get_residuals(imgs,labels) # returns [bs x num_classes]
         residuals += tf.reduce_sum(r,axis=0)
-        c += ds.batch_size
+        c += ds.current_train_batch_size
     residuals /= c
     print('--> time: ',time.time()-t)
     return residuals
@@ -73,7 +74,7 @@ def calc_d2zdw2(ds,model,limit=None):
     if limit == None:
         limit = ds.train_count
         print("d2zdw2 limit not specified, using ",ds.train_count," data points")
-    for i in range(limit//ds.batch_size):
+    for i in range(limit//ds.current_train_batch_size):
         items = ds.get_batch()
         d2zdw2 = model.Get_H(items)
         print([d.shape for d in d2zdw2])
@@ -88,9 +89,12 @@ def calc_R(ds,model,limit=None):
     if limit == None:
         limit = ds.train_count
         print("NME limit not specified, using ",ds.train_count," data points")
-    for i in range(limit//ds.batch_size):
+    for i in range(limit//ds.current_train_batch_size):
+        if i % 100 == 0:
+            print(i)
         items = ds.get_batch()
         R = model.Get_R(items)
+        print(R.shape)
         count += 1
         delta = R - mean
         mean += delta/count
@@ -111,7 +115,10 @@ def calc_G(ds,model,limit=None):
     if limit == None:
         limit = ds.train_count
         print("G limit not specified, using ",ds.train_count," data points")
-    for i in range(limit//ds.batch_size):
+    print('limit: ',limit//ds.current_train_batch_size)
+    for i in range(limit//ds.current_train_batch_size):
+        if i % 100 == 0:
+            print(i)
         items = ds.get_batch()
         metrics = model.Get_G(items)
         

@@ -15,26 +15,26 @@ import Mk2_Funcs as FC
 
 def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 
-    model.remove_softmax()
-    print(model.model.summary())
+    
+    model.make_softmax_model()
     #compute R
-    R = FC.calc_R(data,model,limit=limit)
-    wandb.log({'R_matrix_trace':R},step=epoch)
+    #R = FC.calc_R(data,model,limit=limit)
+    #wandb.log({'R_matrix_trace':R},step=epoch)
 
     [G_mean,S_mean,dzdt2_mean] = FC.calc_G(data,model,limit=limit)
     wandb.log({'G_matrix_trace':G_mean},step=epoch)
     wandb.log({'S_matrix_trace':S_mean},step=epoch)
     wandb.log({'dzdt2_matrix_trace':dzdt2_mean},step=epoch)
 
-    wandb.log({'FullH_matrix_trace':G_mean+R},step=epoch)
+    #wandb.log({'FullH_matrix_trace':G_mean+R},step=epoch)
     #D = FC.calc_d2zdw2(data,model,limit=limit)
-    model.add_softmax()
+
 
 
     #Compute the metrics
     #loss spectrum
-    loss_spectrum = FC.calc_train_loss_spectrum(data,model,limit=limit)
-    wandb.log({'loss_spectrum':loss_spectrum},step=epoch)
+    #loss_spectrum = FC.calc_train_loss_spectrum(data,model,limit=limit)
+    #wandb.log({'loss_spectrum':loss_spectrum},step=epoch)
 
     # #S matrix
     # S = FC.calc_S(data,model,limit=limit)
@@ -64,6 +64,7 @@ def main():
     data = DataClass.Data('mnist',10,split=[0.8,0.2,0])
     data.build_data_in_mem()
 
+
     #build model
     config = {'loss_func':'categorical_crossentropy',
                 'acc_sample_weight':None,
@@ -77,10 +78,28 @@ def main():
                 'img_size':(28,28,1),
                 }
     strategy = None
+    print('Building Model')
     model = ModelClass.Models(config,strategy)
+    #loss = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
+    #optimizer = tf.keras.optimizers.SGD(learning_rate=0.01)
+    #model.model.compile(optimizer=optimizer,loss=loss,metrics=['accuracy'])
 
+    print('Compiling Model')
+    metric_limit = 1000
     data.build_train_iter(bs=1)
-    compute_metrics(data,model,epoch=0,FIM_bs=5,limit=1000)
+    compute_metrics(data,model,epoch=0,FIM_bs=5,limit=metric_limit)
+
+    #train model
+    
+    print(model.model.summary())
+    #print(data.get_batch())
+    for i in range(10):
+        print('Training Epoch: ',i+1)
+        data.build_train_iter(bs=32)
+        data.build_test_iter(bs=32)
+        model.model.fit(data.train_data,validation_data=data.test_data,epochs=1,callbacks=[wandb.keras.WandbCallback(save_model=False)])
+        data.build_train_iter(bs=1)
+        compute_metrics(data,model,epoch=i+1,FIM_bs=5,limit=metric_limit)
     
 
 
