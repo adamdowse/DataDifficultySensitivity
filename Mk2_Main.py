@@ -18,13 +18,13 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
     
     model.make_softmax_model()
     #compute R
-    #R = FC.calc_R(data,model,limit=limit)
-    #wandb.log({'R_matrix_trace':R},step=epoch)
+    R = FC.calc_R(data,model,limit=limit)
+    wandb.log({'R_matrix_trace':R},step=epoch)
 
-    [G_mean,S_mean,dzdt2_mean] = FC.calc_G(data,model,limit=limit)
-    wandb.log({'G_matrix_trace':G_mean},step=epoch)
-    wandb.log({'S_matrix_trace':S_mean},step=epoch)
-    wandb.log({'dzdt2_matrix_trace':dzdt2_mean},step=epoch)
+    #[G_mean,S_mean,dzdt2_mean] = FC.calc_G(data,model,limit=limit)
+    #wandb.log({'G_matrix_trace':G_mean},step=epoch)
+    #wandb.log({'S_matrix_trace':S_mean},step=epoch)
+    #wandb.log({'dzdt2_matrix_trace':dzdt2_mean},step=epoch)
 
     #wandb.log({'FullH_matrix_trace':G_mean+R},step=epoch)
     #D = FC.calc_d2zdw2(data,model,limit=limit)

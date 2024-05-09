@@ -1040,50 +1040,57 @@ class Models():
         del tape1
         return [trG,trS,trdzdt2]
 
-    @tf.function
+    
     def Get_R(self,items):
         #This is the second order Gauss newton matrix term for cat cross entropy
         #tr((S-Y) d2z/dtheta2) (Tried to do this without calcing full seccond order hessian)
         #model should not have softmax
         #batch size should be 1 (for now)
+        z,S = self.Get_z_and_s(items)
+        C = 0
+        for l in range(len(self.model.trainable_variables)-2):
+            print('layer:',l)
+            l_shape = tf.reduce_prod(tf.shape(self.model.trainable_variables[l]))
+            print([items[1].shape[1], l_shape, l_shape])
+            C += self.Get_layer_d2zdt2(l,S,items)
+        return C
+
+
+        
+    @tf.function
+    def Get_z_and_s(self,items):
         imgs,labels = items
-        bs = tf.shape(imgs)[0]
         with tf.GradientTape() as tape:
             z = tf.squeeze(self.model(imgs,training=False))
             s = tf.squeeze(tf.nn.softmax(z))
-        #Y = tf.one_hot(tf.argmax(labels,1),self.num_classes) #one hot the output [num_classes]
-        Y = labels
-        S = s - Y #get the residual [num_classes]
+        S = s - labels #get the residual [num_classes]
+        return z,S
 
-        C = 0
-        theta = [tf.reshape(l,[-1]) for l in self.model.trainable_variables] #flatten the model params [layers x layerparams]
-        #print(self.model.trainable_variables)
-        #print(len(theta))
-        for l in range(len(theta)-2): #sum over layers apart from the last w and b where jacobain is none
-            with tf.GradientTape(persistent=True) as tape1:
-                with tf.GradientTape() as tape:
-                    z = tf.squeeze(self.model(imgs,training=False))
-                # Compute first derivative
-                dy_dtheta = tape.jacobian(z, self.model.trainable_variables[l]) # [num_classes x layerparams]
-            l_shape = tf.shape(self.model.trainable_variables[l])
-            #print(l)
-            #print(self.model.trainable_variables[l])
-            #print(l_shape)
-            l_shape = tf.reduce_prod(l_shape)
-            #print(l_shape)
-            #print(dy_dtheta)
-            # Compute second derivative and add to trace
-            d2 = tape1.jacobian(dy_dtheta, self.model.trainable_variables[l]) # [num_classes x layerparams x layerparams]
-            #print(d2)
-            d2 = tf.reshape(d2, [self.num_classes, l_shape, l_shape])
-            d2 = tf.tensordot(S, d2, axes=1) # [layerparams x layerparams]
-            #C += tf.einsum('c,cii->', S, d2)
+    @tf.function
+    def Get_layer_d2zdt2(self,l,S,items):
+        imgs,labels = items
+        with tf.GradientTape(persistent=True) as tape1:
+            with tf.GradientTape() as tape:
+                z = tf.squeeze(self.model(imgs,training=False))
+            # Compute first derivative
+            dy_dtheta = tape.jacobian(z, self.model.trainable_variables[l]) # [num_classes x layerparams]
+        l_shape = tf.shape(self.model.trainable_variables[l])
+        l_shape = tf.reduce_prod(l_shape)
+        print(dy_dtheta.shape)
 
-            C += tf.linalg.trace(d2)
-            del tape1
-            
-            #print(C)
-        return C
+        # Compute second derivative and add to trace
+        d2 = tape1.jacobian(dy_dtheta, self.model.trainable_variables[l]) # [num_classes x layerparams x layerparams]
+        print(d2.shape)
+        
+        
+        d2 = tf.reshape(d2, [labels.shape[1], l_shape, l_shape])
+        #d2 = tf.tensordot(S, d2, axes=1) # [layerparams x layerparams]
+        d2 = tf.einsum('ac,cii->', S, d2)
+
+        #d2 = tf.linalg.trace(d2)
+        del tape1
+        return d2
+
 
 
     def Get_d2z(self,z,theta,c,i):
