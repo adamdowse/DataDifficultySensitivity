@@ -16,10 +16,12 @@ import Mk2_Funcs as FC
 def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 
     
-    model.make_softmax_model()
+    #model.make_softmax_model() This may be needed for current model?
+
+    #print(model.count_params())
     #compute R
-    R = FC.calc_R(data,model,limit=limit)
-    wandb.log({'R_matrix_trace':R},step=epoch)
+    #R = FC.calc_R(data,model,limit=limit)
+    #wandb.log({'R_matrix_trace':R},step=epoch)
 
     #[G_mean,S_mean,dzdt2_mean] = FC.calc_G(data,model,limit=limit)
     #wandb.log({'G_matrix_trace':G_mean},step=epoch)
@@ -28,8 +30,6 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 
     #wandb.log({'FullH_matrix_trace':G_mean+R},step=epoch)
     #D = FC.calc_d2zdw2(data,model,limit=limit)
-
-
 
     #Compute the metrics
     #loss spectrum
@@ -42,17 +42,15 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
     # wandb.log({'S_matrix_trace':S},step=epoch)
 
     # #F matrix
-    # F = FC.calc_FIM(data,model,FIM_bs,limit=limit)
-    # print('F matrix trace: ',F)
-    # wandb.log({'F_matrix_trace':F},step=epoch)
+    F = FC.calc_FIM(data,model,FIM_bs,limit=limit)
+    print('F matrix trace: ',F)
+    wandb.log({'F_matrix_trace':F},step=epoch)
 
     # #Residuals matrix
     # R = FC.calc_residuals(data,model,limit=limit)
     # print('Residuals: ',R)
     # wandb.log({'Residuals':R},step=epoch)
 
-    # #d2zdw2 matrix
-    # d2zdw2 = FC.calc_d2zdw2(data,model,limit=limit)
 
 
 
@@ -60,30 +58,28 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 
 #main run file
 def main():
-    #load data
-    data = DataClass.Data('mnist',10,split=[0.8,0.2,0])
-    data.build_data_in_mem()
-
-
     #build model
-    config = {'loss_func':'categorical_crossentropy',
+    config = {'loss_func':'binary_crossentropy',
+                'data_name':'imdb_reviews',
                 'acc_sample_weight':None,
                 'optimizer':'SGD',
-                'lr':0.01,
+                'lr':0.0001,
                 'lr_decay_type':'fixed',
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'CNN',
-                'num_classes':10,
-                'img_size':(28,28,1),
+                'model_name':'imdbConv1D',
+                'num_classes':2,
+                'img_size':None,
                 }
     strategy = None
+
+    #load data
+    data = DataClass.Data(config['data_name'],10,split=[0.8,0.2,0])
+    data.build_data_in_mem()
+
     print('Building Model')
     model = ModelClass.Models(config,strategy)
-    #loss = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
-    #optimizer = tf.keras.optimizers.SGD(learning_rate=0.01)
-    #model.model.compile(optimizer=optimizer,loss=loss,metrics=['accuracy'])
-
+    print(model.model.summary())
     print('Compiling Model')
     metric_limit = 1000
     data.build_train_iter(bs=1)
@@ -93,7 +89,7 @@ def main():
     
     print(model.model.summary())
     #print(data.get_batch())
-    for i in range(10):
+    for i in range(20):
         print('Training Epoch: ',i+1)
         data.build_train_iter(bs=32)
         data.build_test_iter(bs=32)
@@ -108,5 +104,5 @@ def main():
 if __name__ == '__main__':
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
     wandb.login()
-    wandb.init(project="Hessian_Decomp_Test")
+    wandb.init(project="DomainFIMs")
     main()

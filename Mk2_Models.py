@@ -21,9 +21,6 @@ class Models():
         #this needs to define hyperparams as well as the model
         print(config)
         self.strategy = strategy
-        self.epoch_num = 0
-        self.epoch_num_adjusted = 0.0
-        self.batch_num = 0
         self.num_classes = config['num_classes']
         self.config = config
         self.img_shape = config['img_size'] #could add a batch dimension here
@@ -32,7 +29,7 @@ class Models():
         self.model_init()
         self.loss_func_init()
         self.model_compile()
-        self.lr_schedule(0,True)
+        #self.lr_schedule(0,True)
         self.max_acc = 0
         self.early_stop_count = 0
         self.pre_process_func = None
@@ -68,7 +65,12 @@ class Models():
         print('INIT: Loss: ',self.config['loss_func'])
         #this needs to define the loss function
         #TODO add more loss functions
-        self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits)
+        match self.config['loss_func']
+            case 'categorical_crossentropy' :
+                self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits)
+            case 'binary_crossentropy' :
+                self.loss_func = tf.keras.losses.BinaryCrossentropy(from_logits=self.output_is_logits)
+        
         # if self.strategy != None:
         #     with self.strategy.scope():
         #         if self.config['loss_func'] == 'categorical_crossentropy' and self.config['acc_sample_weight'] == None:
@@ -97,28 +99,30 @@ class Models():
     def metrics_init(self):
         print('INIT: Metrics')
         #Store for metrics calculated during training
-        if self.strategy != None:
-            with self.strategy.scope():
-                self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
-                self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
-                self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
+        metrics = tf.metrics.BinaryAccuracy(threshold=0.0)
+        return metrics
+        # if self.strategy != None:
+        #     with self.strategy.scope():
+        #         self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
+        #         self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
+        #         self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
 
-                self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
-                self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
-                self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
-                self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
-        else:
-            self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
-            self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
-            self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
+        #         self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
+        #         self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
+        #         self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
+        #         self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
+        # else:
+        #     self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_accuracy')
+        #     self.train_prec_metric = tf.keras.metrics.Precision(name='train_precision')
+        #     self.train_rec_metric = tf.keras.metrics.Recall(name='train_recall')
 
-            self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
-            self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
-            self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
-            self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
+        #     self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
+        #     self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_accuracy')
+        #     self.test_prec_metric = tf.keras.metrics.Precision(name='test_precision')
+        #     self.test_rec_metric = tf.keras.metrics.Recall(name='test_recall')
 
 
-    def model_init(self):
+    def model_init(self,vars=None):
         #this needs to define the model
         def build_resnet(x,vars,num_classes,REG=0):
             kaiming_normal = keras.initializers.VarianceScaling(scale=2.0, mode='fan_out', distribution='untruncated_normal')
@@ -410,7 +414,8 @@ class Models():
                 tf.keras.layers.MaxPool2D((2,2)),
                 tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
-                tf.keras.layers.Dense(self.num_classes,activation='softmax', kernel_initializer=initialiser)
+                tf.keras.layers.Dense(self.num_classes, kernel_initializer=initialiser),
+                tf.keras.layers.Softmax()
             ])
             self.output_is_logits = False
             self.new_img_size = self.img_shape
@@ -904,6 +909,7 @@ class Models():
                 return tf.keras.applications.efficientnet.preprocess_input(x)
             self.pre_process_func = efficientnet_preprocess_input
         elif self.config['model_name'] == "EfficientNetB1":
+
             self.model = tf.keras.applications.EfficientNetB1(
                 include_top = True,
                 weights = None,
@@ -917,6 +923,30 @@ class Models():
                 x = tf.image.resize(x,[32,32])
                 return tf.keras.applications.efficientnet.preprocess_input(x)
             self.pre_process_func = efficientnet_preprocess_input
+
+        elif self.config['model_name'] == "Dense1":
+            self.model = tf.keras.Sequential([
+                tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
+                tf.keras.layers.MaxPool2D((2,2)),
+                tf.keras.layers.Conv2D(32,3,activation='relu', kernel_initializer=initialiser),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(self.num_classes, kernel_initializer=initialiser),
+                tf.keras.layers.Activation('softmax')
+            ])
+            self.output_is_logits = False
+            self.new_img_size = self.img_shape
+        elif self.config['model_name'] == "imdbConv1D":
+            #var = [max_features,sequence_length,embedding_dim]
+            model = tf.keras.Sequential([
+                layers.Embedding(var[0] + 1, var[2], input_length=var[1]), 
+                layers.Conv1D(128, 5, activation='leaky_relu'),
+                layers.MaxPooling1D(2),
+                layers.Conv1D(64, 5, activation='leaky_relu'),
+                layers.Dropout(0.2),
+                layers.GlobalMaxPooling1D(),
+                layers.Dense(64, activation='leaky_relu'),
+                layers.Dense(1)
+            ])
         else:
             print('Model not recognised')
         print('Model built with shape:',self.new_img_size+(1,))
@@ -930,7 +960,8 @@ class Models():
 
     def model_compile(self):
         #self.model.summary()
-        self.model.compile(optimizer=self.optimizer,loss=self.loss_func)
+        #self.model.compile(optimizer=self.optimizer,loss=self.loss_func)
+        self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=init_metrics())
         #wandb.log({'Model':self.count_params()},step=0)
         
 
@@ -1015,8 +1046,9 @@ class Models():
         bs = tf.shape(imgs)[0]
         with tf.GradientTape() as tape1:
             z = tf.squeeze(self.model_nosm(imgs,training=False)) #get the output [num_classes]
-            s = tf.squeeze(tf.nn.softmax(z)) #get the softmax output [num_classes]
+            s = tf.nn.softmax(z) #get the softmax output [num_classes]
         num_classes = tf.shape(z)[0]
+
     
         #S
         S = s[:,None]*s[None,:]
@@ -1041,6 +1073,41 @@ class Models():
         return [trG,trS,trdzdt2]
 
     
+    @tf.function
+    def Get_R_nolayerred(self,items):
+        imgs,labels = items
+        with tf.GradientTape(persistent=True) as tape1:
+            with tf.GradientTape() as tape:
+                z = tf.squeeze(self.model(imgs,training=False))
+                s = tf.nn.softmax(z)
+            # Compute first derivative
+            S = s - labels #get the residual [num_classes]
+            params = tf.concat([tf.reshape(v,[-1]) for v in self.model.trainable_variables],axis=0) # [layerparams]
+            print('params',params)
+            dy_dtheta = tape.jacobian(z, params) # [num_classes x layers x layerparams]
+            print('dy_dtheta',dy_dtheta)
+            #dy_dtheta = [tf.reshape(l,[labels.shape[1],-1]) for l in dy_dtheta] # [num_classes x layerparams]
+            #dy_dtheta = tf.concat(dy_dtheta,axis=1) # [num_classes x layerparams]
+            #print('dy_dtheta',dy_dtheta)
+
+        # Compute second derivative and add to trace
+        d2 = tape1.jacobian(dy_dtheta, params) # [num_classes x layerparams x layerparams]
+        print(d2)
+        #d2 = [tf.reshape(l,[labels.shape[1],-1,-1]) for l in d2] 
+        #d2 = tf.concat(d2,axis=1) # [num_classes x layerparams x layerparams]
+
+        #l_shapes = [tf.shape(v) for v in self.model.trainable_variables]
+        #print(l_shapes)
+        #l_shapes = tf.reduce_prod([tf.reduce_prod(v) for v in l_shapes])
+        #print(l_shapes)
+        #d2 = tf.reshape(d2, [labels.shape[1], l_shapes, l_shapes])
+        #d2 = tf.tensordot(S, d2, axes=1) # [layerparams x layerparams]
+        d2 = tf.einsum('ac,cii->', S, d2)
+
+        #d2 = tf.linalg.trace(d2)
+        del tape1
+        return d2
+
     def Get_R(self,items):
         #This is the second order Gauss newton matrix term for cat cross entropy
         #tr((S-Y) d2z/dtheta2) (Tried to do this without calcing full seccond order hessian)
@@ -1048,21 +1115,17 @@ class Models():
         #batch size should be 1 (for now)
         z,S = self.Get_z_and_s(items)
         C = 0
-        for l in range(len(self.model.trainable_variables)-2):
-            print('layer:',l)
-            l_shape = tf.reduce_prod(tf.shape(self.model.trainable_variables[l]))
-            print([items[1].shape[1], l_shape, l_shape])
+        for l in range(len(self.model_nosm.trainable_variables)-2):
+            l_shape = tf.reduce_prod(tf.shape(self.model_nosm.trainable_variables[l]))
             C += self.Get_layer_d2zdt2(l,S,items)
         return C
-
-
         
     @tf.function
     def Get_z_and_s(self,items):
         imgs,labels = items
         with tf.GradientTape() as tape:
-            z = tf.squeeze(self.model(imgs,training=False))
-            s = tf.squeeze(tf.nn.softmax(z))
+            z = tf.squeeze(self.model_nosm(imgs,training=False))
+            s = tf.nn.softmax(z) #CHANGED THIS TO NOT SQUEEZE
         S = s - labels #get the residual [num_classes]
         return z,S
 
@@ -1071,18 +1134,14 @@ class Models():
         imgs,labels = items
         with tf.GradientTape(persistent=True) as tape1:
             with tf.GradientTape() as tape:
-                z = tf.squeeze(self.model(imgs,training=False))
+                z = tf.squeeze(self.model_nosm(imgs,training=False))
             # Compute first derivative
-            dy_dtheta = tape.jacobian(z, self.model.trainable_variables[l]) # [num_classes x layerparams]
-        l_shape = tf.shape(self.model.trainable_variables[l])
+            dy_dtheta = tape.jacobian(z, self.model_nosm.trainable_variables[l]) # [num_classes x layerparams]
+        l_shape = tf.shape(self.model_nosm.trainable_variables[l])
         l_shape = tf.reduce_prod(l_shape)
-        print(dy_dtheta.shape)
 
         # Compute second derivative and add to trace
-        d2 = tape1.jacobian(dy_dtheta, self.model.trainable_variables[l]) # [num_classes x layerparams x layerparams]
-        print(d2.shape)
-        
-        
+        d2 = tape1.jacobian(dy_dtheta, self.model_nosm.trainable_variables[l]) # [num_classes x layerparams x layerparams]
         d2 = tf.reshape(d2, [labels.shape[1], l_shape, l_shape])
         #d2 = tf.tensordot(S, d2, axes=1) # [layerparams x layerparams]
         d2 = tf.einsum('ac,cii->', S, d2)
@@ -1090,19 +1149,6 @@ class Models():
         #d2 = tf.linalg.trace(d2)
         del tape1
         return d2
-
-
-
-    def Get_d2z(self,z,theta,c,i):
-        #get the second order derivative of z wrt theta for class c and param i
-        #z is the output of the model [num_classes]
-        #theta is the model parameters [num_params]
-        #c is the class [1]
-        #i is the param [1]
-        #returns [1]
-        zc = z[c]
-        theta_i = theta[i]
-        d2z = tf.gradients(tf.gradients(zc,theta_i),theta_i)[0]
 
 
     def make_softmax_model(self):

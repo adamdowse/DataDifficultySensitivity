@@ -89,12 +89,13 @@ def calc_R(ds,model,limit=None):
     if limit == None:
         limit = ds.train_count
         print("NME limit not specified, using ",ds.train_count," data points")
+    else:
+        print('limit: ',limit," data points")
     for i in range(limit//ds.current_train_batch_size):
         if i % 100 == 0:
             print(i)
         items = ds.get_batch()
         R = model.Get_R(items)
-        print(R.shape)
         count += 1
         delta = R - mean
         mean += delta/count
@@ -174,13 +175,15 @@ def calc_FIM(ds,model,FIM_bs,limit=None):
     s = 0
     ds.build_train_iter(shuffle=True,bs=FIM_bs)
     for _ in range(limit//FIM_bs):
-        if data_count/FIM_BS % 100 == 0:
+        if data_count/FIM_bs % 100 == 0:
             print(data_count)
-        z = model.Get_Z(next(ds.iter_train))#returns [FIM_bs x 1]
+        z = model.Get_Z(ds.get_batch())#returns [FIM_bs x 1]
         s += tf.reduce_sum(z)
         data_count += FIM_bs
     mean = s/data_count
     print('--> time: ',time.time()-t)
+    #convert to numpy
+    mean = mean.numpy()
     return mean
 
 def calc_FIM_var(ds,model,FIM_bs,limit=None):

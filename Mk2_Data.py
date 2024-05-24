@@ -129,10 +129,110 @@ class Data():
             self.input_shape = (32,32,3)
             self.total_data_points = 50000
             return True
+        
+        elif dataset_name == 'imdb_reviews':
+            self.x_type = 'text'
+            self.num_classes = 2
+            self.input_shape = None
+            self.total_data_points = 50000
+            return True
 
         else:
             print('Dataset not recognised')
             return False
+
+    def get_MNIST(self):
+        #returns the mnist dataset in tf format as onehot and normalised
+        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+        #Resize data if needed
+        if self.train_count != None:
+            if len(x_train) > self.train_count:
+                x_train = x_train[:self.train_count]
+                y_train = y_train[:self.train_count]
+            else:
+                print('Train count is larger than dataset size so original size is used')
+        else:
+            self.train_count = len(x_train)
+            print('Train count not specified, using full dataset')
+        
+        if self.test_count != None:
+            if len(x_test) > self.test_count:
+                x_test = x_test[:self.test_count]
+                y_test = y_test[:self.test_count]
+            else:
+                print('Test count is larger than dataset size so original size is used')
+        else:
+            self.test_count = len(x_test)
+            print('Test count not specified, using full dataset')
+        
+        if self.val_count != None and self.split[2] != 0:
+            if len(x_val) > self.val_count:
+                x_val = x_val[:self.val_count]
+                y_val = y_val[:self.val_count]
+            else:
+                print('Val count is larger than dataset size so original size is used')
+
+        #map x to float32 and normalise
+        x_train = tf.cast(x_train,tf.float32)/255
+        x_test = tf.cast(x_test,tf.float32)/255
+        if self.split[2] != 0:
+            x_val = tf.cast(x_val,tf.float32)/255
+
+        #map y to one hot
+        y_train = tf.one_hot(y_train,self.num_classes)
+        y_test = tf.one_hot(y_test,self.num_classes)
+        if self.split[2] != 0:
+            y_val = tf.one_hot(y_val,self.num_classes)
+
+        #Convert to tf dataset
+        train_data = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        test_data = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+        if self.split[2] != 0:
+            val_data = tf.data.Dataset.from_tensor_slices((x_val, y_val))
+        else:
+            val_data = None
+        return train_data, test_data, val_data
+
+    def get_imdb_reviews(self,vocab_size,max_length,max_features=10000,sequence_length=250):
+        #Load the data
+        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.imdb.load_data(num_words=vocab_size)
+
+        #Pad the data
+        x_train = tf.keras.preprocessing.sequence.pad_sequences(x_train, maxlen=max_length)
+        x_test = tf.keras.preprocessing.sequence.pad_sequences(x_test, maxlen=max_length)
+
+        #Tokenize the data
+        #tokenizer = tf.keras.preprocessing.text.Tokenizer(num_words=config.vocab_size,st)
+        #tokenizer.fit_on_texts(x_train)
+        #x_train = tokenizer.texts_to_sequences(x_train)
+        #x_test = tokenizer.texts_to_sequences(x_test)
+
+        #Create the dataset
+        train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+
+        def custom_standardization(input_data):
+            lowercase = tf.strings.lower(input_data)
+            stripped_html = tf.strings.regex_replace(lowercase, '<br />', ' ')
+            return tf.strings.regex_replace(stripped_html,'[%s]' % re.escape(string.punctuation),'')
+
+        vectorize_layer = layers.TextVectorization(
+            standardize=custom_standardization,
+            max_tokens=max_features,
+            output_mode='int',
+            output_sequence_length=sequence_length)
+
+        train_text = train_ds.map(lambda x, y: x)
+        vectorize_layer.adapt(train_text)
+
+        def vectorize_text(text, label):
+            text = tf.expand_dims(text, -1)
+            return vectorize_layer(text), label
+
+        train_ds = train_ds.map(vectorize_text)
+        test_ds = test_ds.map(vectorize_text)
+
+        return train_ds, test_ds, None
 
 
     def build_data_in_mem(self):
@@ -141,49 +241,14 @@ class Data():
         
         #Pull from web source
         #Currently uses only default splits
-        if self.dataset_name == 'mnist':
-            (self.x_train, self.y_train), (self.x_test, self.y_test) = tf.keras.datasets.mnist.load_data()
-        else:
-            print('Dataset not recognised')
-            return None
-        
-        #Resize data if needed
-        if self.train_count != None:
-            if len(self.x_train) > self.train_count:
-                self.x_train = self.x_train[:self.train_count]
-                self.y_train = self.y_train[:self.train_count]
-            else:
-                print('Train count is larger than dataset size so original size is used')
-        else:
-            self.train_count = len(self.x_train)
-            print('Train count not specified, using full dataset')
-        
-        if self.test_count != None:
-            if len(self.x_test) > self.test_count:
-                self.x_test = self.x_test[:self.test_count]
-                self.y_test = self.y_test[:self.test_count]
-            else:
-                print('Test count is larger than dataset size so original size is used')
-        else:
-            self.test_count = len(self.x_test)
-            print('Test count not specified, using full dataset')
-        
-        if self.val_count != None and self.split[2] != 0:
-            if len(self.x_val) > self.val_count:
-                self.x_val = self.x_val[:self.val_count]
-                self.y_val = self.y_val[:self.val_count]
-            else:
-                print('Val count is larger than dataset size so original size is used')
-
-        #map y to one hot
-        self.y_train = tf.one_hot(self.y_train,self.num_classes)
-        self.y_test = tf.one_hot(self.y_test,self.num_classes)
-
-        #Convert to tf dataset
-        self.train_data = tf.data.Dataset.from_tensor_slices((self.x_train, self.y_train))
-        self.test_data = tf.data.Dataset.from_tensor_slices((self.x_test, self.y_test))
-        if self.split[2] != 0:
-            self.val_data = tf.data.Dataset.from_tensor_slices((self.x_val, self.y_val))
+        match self.dataset_name:
+            case 'mnist':
+                self.train_data,self.test_data,self.val_data = get_MNIST()
+            case 'imdb_reviews':
+                self.train_data,self.test_data,self.val_data = get_imdb_reviews()
+            case _:
+                print('Dataset not recognised')
+                return None
         
         #Augment data if needed
         if self.train_augment != None:
@@ -192,7 +257,6 @@ class Data():
             self.test_augment.mem_augment(self.test_data,self.num_classes)
         if self.val_augment != None:
             self.val_augment.mem_augment(self.val_data,self.num_classes)
-        
         
         #shuffle and batch data
         self.train_data = self.train_data.shuffle(self.train_count).batch(self.batch_size)
