@@ -42,7 +42,7 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
     # wandb.log({'S_matrix_trace':S},step=epoch)
 
     # #F matrix
-    F = FC.calc_FIM(data,model,FIM_bs,limit=limit)
+    F = FC.calc_FIM(data,model,FIM_bs,limit=limit,model_output_type='binary_logit')
     print('F matrix trace: ',F)
     wandb.log({'F_matrix_trace':F},step=epoch)
 
@@ -62,12 +62,13 @@ def main():
     config = {'loss_func':'binary_crossentropy',
                 'data_name':'imdb_reviews',
                 'acc_sample_weight':None,
-                'optimizer':'SGD',
+                'optimizer':'Adam',
                 'lr':0.0001,
                 'lr_decay_type':'fixed',
                 'label_smoothing':None,
                 'model_init_type':None,
                 'model_name':'imdbConv1D',
+                'model_vars': [10000,250,16], #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':2,
                 'img_size':None,
                 }
@@ -89,13 +90,15 @@ def main():
     
     print(model.model.summary())
     #print(data.get_batch())
-    for i in range(20):
-        print('Training Epoch: ',i+1)
+    for i in range(15):
+        #TODO There is a memory leak most likely with dataset building each epoch
+        #tf error in converting index sliced
+        print('Training Epoch: ',(i+1)*4)
         data.build_train_iter(bs=32)
         data.build_test_iter(bs=32)
-        model.model.fit(data.train_data,validation_data=data.test_data,epochs=1,callbacks=[wandb.keras.WandbCallback(save_model=False)])
+        model.model.fit(data.train_data,validation_data=data.test_data,epochs=4,callbacks=[wandb.keras.WandbCallback(save_model=False)])
         data.build_train_iter(bs=1)
-        compute_metrics(data,model,epoch=i+1,FIM_bs=5,limit=metric_limit)
+        compute_metrics(data,model,epoch=(i+1)*4,FIM_bs=5,limit=metric_limit)
     
 
 

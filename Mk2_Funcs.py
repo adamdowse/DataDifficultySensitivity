@@ -164,7 +164,7 @@ def calc_dist_FIM(ds,model,FIM_bs,limit=None):
     print('--> time: ',time.time()-t)
     return mean
 
-def calc_FIM(ds,model,FIM_bs,limit=None):
+def calc_FIM(ds,model,FIM_bs,limit=None,model_output_type='binary_logit'):
     print('Calculating FIM (Non-Distributed)')
     t = time.time()
     if limit == None:
@@ -177,7 +177,10 @@ def calc_FIM(ds,model,FIM_bs,limit=None):
     for _ in range(limit//FIM_bs):
         if data_count/FIM_bs % 100 == 0:
             print(data_count)
-        z = model.Get_Z(ds.get_batch())#returns [FIM_bs x 1]
+        if model_output_type == 'binary_logit':
+            z = model.Get_Z_logit(ds.get_batch())#returns [FIM_bs x 1]
+        else:
+            z = model.Get_Z(ds.get_batch())#returns [FIM_bs x 1]
         s += tf.reduce_sum(z)
         data_count += FIM_bs
     mean = s/data_count

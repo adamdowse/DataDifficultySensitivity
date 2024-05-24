@@ -26,7 +26,7 @@ class Models():
         self.img_shape = config['img_size'] #could add a batch dimension here
         self.optimizer_init()
         self.metrics_init()
-        self.model_init()
+        self.model_init(vars=config['model_vars'])
         self.loss_func_init()
         self.model_compile()
         #self.lr_schedule(0,True)
@@ -53,7 +53,8 @@ class Models():
             self.lr_schedule(0,init=True)
             if self.config['optimizer'] == 'Adam':
                 #lr decay params = [epsilon] defult = [1e-7]
-                self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['lr'], epsilon=self.config['decay_param'][0],beta_1=0.9, beta_2=0.999, amsgrad=False)
+                self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['lr'])
+                #self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['lr'], epsilon=self.config['decay_param'][0],beta_1=0.9, beta_2=0.999, amsgrad=False)
             elif self.config['optimizer'] == 'SGD':
                 self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config['lr'])
             elif self.config['optimizer'] == 'Momentum':
@@ -65,7 +66,7 @@ class Models():
         print('INIT: Loss: ',self.config['loss_func'])
         #this needs to define the loss function
         #TODO add more loss functions
-        match self.config['loss_func']
+        match self.config['loss_func']:
             case 'categorical_crossentropy' :
                 self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits)
             case 'binary_crossentropy' :
@@ -937,8 +938,8 @@ class Models():
             self.new_img_size = self.img_shape
         elif self.config['model_name'] == "imdbConv1D":
             #var = [max_features,sequence_length,embedding_dim]
-            model = tf.keras.Sequential([
-                layers.Embedding(var[0] + 1, var[2], input_length=var[1]), 
+            self.model = tf.keras.Sequential([
+                layers.Embedding(vars[0] + 1, vars[2], input_length=vars[1]), 
                 layers.Conv1D(128, 5, activation='leaky_relu'),
                 layers.MaxPooling1D(2),
                 layers.Conv1D(64, 5, activation='leaky_relu'),
@@ -947,10 +948,13 @@ class Models():
                 layers.Dense(64, activation='leaky_relu'),
                 layers.Dense(1)
             ])
+            self.output_is_logits = True
         else:
             print('Model not recognised')
-        print('Model built with shape:',self.new_img_size+(1,))
-        self.model.build(input_shape=self.new_img_size + (1,))
+        
+        if self.config['model_name'] != "imdbConv1D":
+            print('Model built with shape:',self.new_img_size+(1,))
+            self.model.build(input_shape=self.new_img_size + (1,))
     
     def count_params(self):
         trainable_params = np.sum([np.prod(v.get_shape()) for v in self.model.trainable_weights])
@@ -961,7 +965,7 @@ class Models():
     def model_compile(self):
         #self.model.summary()
         #self.model.compile(optimizer=self.optimizer,loss=self.loss_func)
-        self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=init_metrics())
+        self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=self.metrics_init())
         #wandb.log({'Model':self.count_params()},step=0)
         
 
@@ -1033,6 +1037,28 @@ class Models():
         j = tf.square(j) #square the jacobian [BS x num_params]
         j = tf.reduce_sum(j) #sum the jacobian [BS x 1]
         return j 
+
+    @tf.function
+    def Get_Z_logit(self,items):
+        x,y = items
+        bs = tf.shape(x)[0]
+        with tf.GradientTape() as tape:
+            #print(text_batch[i])
+            #item = tf.expand_dims(x[i],0)
+            y_hat = self.model(x,training=False) #[BS x logits]
+            y_hat = tf.nn.sigmoid(y_hat)    #convert to probabilities [BS x probs]
+            y_hat = tf.concat([1-y_hat,y_hat],axis=1) #[BS x [0.3,0.7]]  #convert to categorical
+            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
+            output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #[Bs x 1]
+            output = tf.math.log(output)
+        
+        g = tape.jacobian(output,self.model.trainable_variables)
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
+        g = [tf.reshape(g[i],(bs,layer_sizes[i])) for i in range(len(g))] #reshape the gradient to [BS x num_layer_params x layers]
+        g = tf.concat(g,axis=1) #concat the gradient over the layers [BS x num_params]
+        g = tf.square(g) #square the gradient [BS x num_params]
+        g = tf.reduce_sum(g) #sum the gradient [ 1]
+        return g
 
     @tf.function
     def Get_G(self,items):

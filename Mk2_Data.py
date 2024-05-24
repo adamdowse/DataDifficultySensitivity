@@ -193,44 +193,67 @@ class Data():
             val_data = None
         return train_data, test_data, val_data
 
-    def get_imdb_reviews(self,vocab_size,max_length,max_features=10000,sequence_length=250):
+    def get_imdb_reviews(self,max_features=10000,sequence_length=250):
         #Load the data
-        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.imdb.load_data(num_words=vocab_size)
-
-        #Pad the data
-        x_train = tf.keras.preprocessing.sequence.pad_sequences(x_train, maxlen=max_length)
-        x_test = tf.keras.preprocessing.sequence.pad_sequences(x_test, maxlen=max_length)
-
-        #Tokenize the data
-        #tokenizer = tf.keras.preprocessing.text.Tokenizer(num_words=config.vocab_size,st)
-        #tokenizer.fit_on_texts(x_train)
-        #x_train = tokenizer.texts_to_sequences(x_train)
-        #x_test = tokenizer.texts_to_sequences(x_test)
+        start_char = 1
+        oov_char = 2
+        index_from = 3
+        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.imdb.load_data(start_char=start_char, oov_char=oov_char, index_from=index_from, num_words=max_features)
+        self.num_classes = 2
+        self.train_count = len(x_train)
+        self.test_count = len(x_test)
+        word_index = tf.keras.datasets.imdb.get_word_index(path="imdb_word_index.json")
+        inverted_word_index = dict(
+            (i + index_from, word) for (word, i) in word_index.items()
+        )
+        # Update `inverted_word_index` to include `start_char` and `oov_char`
+        inverted_word_index[start_char] = "[START]"
+        inverted_word_index[oov_char] = "[OOV]"
+        decoded_sequence = " ".join(inverted_word_index[i] for i in x_train[0])
+        x_train = tf.keras.preprocessing.sequence.pad_sequences(x_train, maxlen=sequence_length)
+        x_test = tf.keras.preprocessing.sequence.pad_sequences(x_test, maxlen=sequence_length)
+        #print("Decoded sequence:", decoded_sequence)
+        #print("Original sequence:", x_train[0])
 
         #Create the dataset
         train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train))
         test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 
-        def custom_standardization(input_data):
-            lowercase = tf.strings.lower(input_data)
-            stripped_html = tf.strings.regex_replace(lowercase, '<br />', ' ')
-            return tf.strings.regex_replace(stripped_html,'[%s]' % re.escape(string.punctuation),'')
+        #BELOW IS NEEDED FOR TEXT INPUT
+        # #sequence to text to simulate text input
+        # def sequence_to_text(sequence):
+        #     words = [inverted_word_index[i] for i in sequence if i > 2]
+        #     text = " ".join(words)
+        #     return text
+        
+        # train_ds = train_ds.map(lambda x, y: (sequence_to_text(x), y))
+        # test_ds = test_ds.map(lambda x, y: (sequence_to_text(x), y))
 
-        vectorize_layer = layers.TextVectorization(
-            standardize=custom_standardization,
-            max_tokens=max_features,
-            output_mode='int',
-            output_sequence_length=sequence_length)
+        # print("Text example:", train_ds.take(1))
 
-        train_text = train_ds.map(lambda x, y: x)
-        vectorize_layer.adapt(train_text)
+        # #Vectorize the text
+        # def custom_standardization(input_data):
+        #     #remove start and end tags
+        #     stripped_html = tf.strings.regex_replace(input_data, '[START]', '')
+        #     lowercase = tf.strings.lower(input_data)
+        #     #stripped_html = tf.strings.regex_replace(lowercase, '<br />', ' ')
+        #     return tf.strings.regex_replace(stripped_html,'[%s]' % re.escape(string.punctuation),'')
 
-        def vectorize_text(text, label):
-            text = tf.expand_dims(text, -1)
-            return vectorize_layer(text), label
+        # vectorize_layer = layers.TextVectorization(
+        #     standardize=custom_standardization,
+        #     max_tokens=max_features,
+        #     output_mode='int',
+        #     output_sequence_length=sequence_length)
 
-        train_ds = train_ds.map(vectorize_text)
-        test_ds = test_ds.map(vectorize_text)
+        # train_text = train_ds.map(lambda x, y: x)
+        # vectorize_layer.adapt(train_text)
+
+        # def vectorize_text(text, label):
+        #     text = tf.expand_dims(text, -1)
+        #     return vectorize_layer(text), label
+
+        # train_ds = train_ds.map(vectorize_text)
+        # test_ds = test_ds.map(vectorize_text)
 
         return train_ds, test_ds, None
 
@@ -243,9 +266,9 @@ class Data():
         #Currently uses only default splits
         match self.dataset_name:
             case 'mnist':
-                self.train_data,self.test_data,self.val_data = get_MNIST()
+                self.train_data,self.test_data,self.val_data = self.get_MNIST()
             case 'imdb_reviews':
-                self.train_data,self.test_data,self.val_data = get_imdb_reviews()
+                self.train_data,self.test_data,self.val_data = self.get_imdb_reviews()
             case _:
                 print('Dataset not recognised')
                 return None
@@ -280,6 +303,13 @@ class Data():
                 print('Batch size updated to: ',bs)
         self.train_batches = self.train_count//bs
         self.iter_train = iter(self.train_data)
+
+    def shuffle_data(self):
+        #shuffle the data
+        self.train_data = self.train_data.shuffle(self.train_count)
+        self.test_data = self.test_data.shuffle(self.test_count)
+        if self.split[2] != 0:
+            self.val_data = self.val_data.shuffle(self.val_count)
 
     def build_test_iter(self,shuffle=False,bs=None):
         #Shuffle and batch data
