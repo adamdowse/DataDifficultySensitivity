@@ -136,6 +136,12 @@ class Data():
             self.input_shape = None
             self.total_data_points = 50000
             return True
+        elif dataset_name == 'newswire':
+            self.x_type = 'text'
+            self.num_classes = 46
+            self.input_shape = None
+            self.total_data_points = 11,228 
+            return True
 
         else:
             print('Dataset not recognised')
@@ -257,6 +263,37 @@ class Data():
 
         return train_ds, test_ds, None
 
+    def get_newswire(self,max_features=10000,sequence_length=250):
+        #Load the data
+        start_char = 1
+        oov_char = 2
+        index_from = 3
+        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.reuters.load_data(start_char=start_char, oov_char=oov_char, index_from=index_from, num_words=max_features)
+        self.num_classes = 46
+        self.train_count = len(x_train)
+        self.test_count = len(x_test)
+        word_index = tf.keras.datasets.reuters.get_word_index(path="reuters_word_index.json")
+        inverted_word_index = dict(
+            (i + index_from, word) for (word, i) in word_index.items()
+        )
+        # Update `inverted_word_index` to include `start_char` and `oov_char`
+        inverted_word_index[start_char] = "[START]"
+        inverted_word_index[oov_char] = "[OOV]"
+        decoded_sequence = " ".join(inverted_word_index[i] for i in x_train[0])
+        x_train = tf.keras.preprocessing.sequence.pad_sequences(x_train, maxlen=sequence_length)
+        x_test = tf.keras.preprocessing.sequence.pad_sequences(x_test, maxlen=sequence_length)
+        #print("Decoded sequence:", decoded_sequence)
+        #print("Original sequence:", x_train[0])
+
+        #convert to onehot
+        y_train = tf.one_hot(y_train,self.num_classes)
+        y_test = tf.one_hot(y_test,self.num_classes)
+
+        #Create the dataset
+        train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+
+        return train_ds, test_ds, None
 
     def build_data_in_mem(self):
         #build the dataset from source and hold all in memory 
@@ -269,6 +306,8 @@ class Data():
                 self.train_data,self.test_data,self.val_data = self.get_MNIST()
             case 'imdb_reviews':
                 self.train_data,self.test_data,self.val_data = self.get_imdb_reviews()
+            case 'newswire':
+                self.train_data,self.test_data,self.val_data = self.get_newswire()
             case _:
                 print('Dataset not recognised')
                 return None
@@ -297,11 +336,11 @@ class Data():
             self.train_data = self.train_data.shuffle(self.train_count)
         if bs != None:
             if self.current_train_batch_size != bs:
-                self.train_data = self.train_data.unbatch()
-                self.train_data = self.train_data.batch(bs)
+                self.iter_train_data = self.train_data.unbatch()
+                self.iter_train_data = self.train_data.batch(bs)
                 self.current_train_batch_size = bs
                 print('Batch size updated to: ',bs)
-        self.train_batches = self.train_count//bs
+        #self.train_batches = self.iter_train_count//bs
         self.iter_train = iter(self.train_data)
 
     def shuffle_data(self):

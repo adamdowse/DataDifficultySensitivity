@@ -100,7 +100,8 @@ class Models():
     def metrics_init(self):
         print('INIT: Metrics')
         #Store for metrics calculated during training
-        metrics = tf.metrics.BinaryAccuracy(threshold=0.0)
+        #metrics = tf.metrics.BinaryAccuracy(threshold=0.0)
+        metrics = tf.metrics.CategoricalAccuracy()
         return metrics
         # if self.strategy != None:
         #     with self.strategy.scope():
@@ -949,10 +950,23 @@ class Models():
                 layers.Dense(1)
             ])
             self.output_is_logits = True
+        elif self.config['model_name'] == 'newswireConv1D':
+            #var = [max_features,sequence_length,embedding_dim]
+            self.model = tf.keras.Sequential([
+                layers.Embedding(vars[0] + 1, vars[2], input_length=vars[1]), 
+                layers.Conv1D(128, 5, activation='leaky_relu'),
+                layers.MaxPooling1D(2),
+                layers.Conv1D(64, 5, activation='leaky_relu'),
+                layers.Dropout(0.2),
+                layers.GlobalMaxPooling1D(),
+                layers.Dense(64, activation='leaky_relu'),
+                layers.Dense(46, activation='softmax')
+            ])
+            self.output_is_logits = False
         else:
             print('Model not recognised')
         
-        if self.config['model_name'] != "imdbConv1D":
+        if self.config['model_name'] not in ["imdbConv1D","newswireConv1D"]:
             print('Model built with shape:',self.new_img_size+(1,))
             self.model.build(input_shape=self.new_img_size + (1,))
     
@@ -1051,6 +1065,26 @@ class Models():
             selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
             output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #[Bs x 1]
             output = tf.math.log(output)
+        
+        g = tape.jacobian(output,self.model.trainable_variables)
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
+        g = [tf.reshape(g[i],(bs,layer_sizes[i])) for i in range(len(g))] #reshape the gradient to [BS x num_layer_params x layers]
+        g = tf.concat(g,axis=1) #concat the gradient over the layers [BS x num_params]
+        g = tf.square(g) #square the gradient [BS x num_params]
+        g = tf.reduce_sum(g) #sum the gradient [ 1]
+        return g
+
+    @tf.function
+    def Get_Z_softmax(self,items):
+        x,y = items
+        bs = tf.shape(x)[0]
+        with tf.GradientTape() as tape:
+            #print(text_batch[i])
+            y_hat = self.model(x,training=False) #get model output (softmax) [BS x num_classes]
+            print(y_hat)
+            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
+            output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
+            output = tf.math.log(output) #log the output [BS x 1]
         
         g = tape.jacobian(output,self.model.trainable_variables)
         layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
