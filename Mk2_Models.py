@@ -17,9 +17,10 @@ import Mk2_Data as custom_data
 #CHANGED MOST TO TF.KERAS MIGHT NEED TO CHANGE BACK TO WORK
 
 class Models():
-    def __init__(self,config,strategy):
+    def __init__(self,config,strategy,data=None):
         #this needs to define hyperparams as well as the model
         print(config)
+        self.data = data
         self.strategy = strategy
         self.num_classes = config['num_classes']
         self.config = config
@@ -71,6 +72,8 @@ class Models():
                 self.loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=self.output_is_logits)
             case 'binary_crossentropy' :
                 self.loss_func = tf.keras.losses.BinaryCrossentropy(from_logits=self.output_is_logits)
+            case 'sparse_categorical_crossentropy' :
+                self.loss_func = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=self.output_is_logits)
         
         # if self.strategy != None:
         #     with self.strategy.scope():
@@ -100,8 +103,15 @@ class Models():
     def metrics_init(self):
         print('INIT: Metrics')
         #Store for metrics calculated during training
-        #metrics = tf.metrics.BinaryAccuracy(threshold=0.0)
-        metrics = tf.metrics.CategoricalAccuracy()
+        match self.config['loss_func']:
+            case 'categorical_crossentropy' :
+                metrics = tf.metrics.CategoricalAccuracy()
+            case 'binary_crossentropy' :
+                metrics = tf.metrics.BinaryAccuracy(threshold=0.0)
+            case 'sparse_categorical_crossentropy' :
+                metrics = tf.metrics.SparseCategoricalAccuracy()
+            case _:
+                print('Loss not recognised for accuracy metric')
         return metrics
         # if self.strategy != None:
         #     with self.strategy.scope():
@@ -963,10 +973,26 @@ class Models():
                 layers.Dense(46, activation='softmax')
             ])
             self.output_is_logits = False
+
+        elif self.config['model_name'] == "speechcommandsCNN":
+            self.model = tf.keras.Sequential([
+                layers.Input(shape=(124,129,1)),
+                layers.Resizing(32,32),
+                self.data.norm_layer,
+                layers.Conv2D(32,3,activation='relu'),
+                layers.Conv2D(64,3,activation='relu'),
+                layers.MaxPooling2D(),
+                layers.Dropout(0.25),
+                layers.Flatten(),
+                layers.Dense(128,activation='relu'),
+                layers.Dropout(0.5),
+                layers.Dense(self.num_classes,activation='softmax')
+            ])
+            self.output_is_logits = False
         else:
             print('Model not recognised')
         
-        if self.config['model_name'] not in ["imdbConv1D","newswireConv1D"]:
+        if self.config['model_name'] not in ["imdbConv1D","newswireConv1D","speechcommandsCNN"]:
             print('Model built with shape:',self.new_img_size+(1,))
             self.model.build(input_shape=self.new_img_size + (1,))
     
@@ -980,6 +1006,8 @@ class Models():
         #self.model.summary()
         #self.model.compile(optimizer=self.optimizer,loss=self.loss_func)
         self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=self.metrics_init())
+        print('Model compiled')
+        print(self.model.summary())
         #wandb.log({'Model':self.count_params()},step=0)
         
 

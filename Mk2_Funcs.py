@@ -173,7 +173,7 @@ def calc_FIM(ds,model,FIM_bs,limit=None,model_output_type='binary_logit'):
     
     data_count = 0
     s = 0
-    ds.build_train_iter(shuffle=True,bs=FIM_bs)
+    ds.build_iter_ds(shuffle=True,bs=FIM_bs)
     for _ in range(limit//FIM_bs):
         if data_count/FIM_bs % 100 == 0:
             print(data_count)

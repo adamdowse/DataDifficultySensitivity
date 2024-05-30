@@ -59,46 +59,38 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 #main run file
 def main():
     #build model
-    config = {'loss_func':'categorical_crossentropy',
-                'data_name':'newswire',
+    config = {'loss_func':'sparse_categorical_crossentropy',
+                'data_name':'speech_commands',
                 'acc_sample_weight':None,
                 'optimizer':'Adam',
                 'lr':0.001,
                 'lr_decay_type':'fixed',
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'newswireConv1D',
-                'model_vars': [10000,250,16], #var = [max_features,sequence_length,embedding_dim]
-                'num_classes':46,
+                'model_name':'speechcommandsCNN',
+                'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
+                'num_classes':8,
                 'img_size':None,
                 }
     strategy = None
 
     #load data
+    print('Building Data')
     data = DataClass.Data(config['data_name'],10,split=[0.8,0.2,0])
-    data.build_data_in_mem()
+    data.build_data()
 
     print('Building Model')
-    model = ModelClass.Models(config,strategy)
-    print(model.model.summary())
-    print('Compiling Model')
+    model = ModelClass.Models(config,strategy,data)
     metric_limit = 1000
-    data.build_train_iter(bs=1)
-    compute_metrics(data,model,epoch=0,FIM_bs=5,limit=metric_limit)
+    #compute_metrics(data,model,epoch=0,FIM_bs=5,limit=metric_limit)
 
     #train model
-    
-    print(model.model.summary())
-    #print(data.get_batch())
     for i in range(25):
         #TODO There is a memory leak most likely with dataset building each epoch
-        #tf error in converting index sliced
+        #tf error in converting index slices to tensors
         print('Training Epoch: ',(i+1)*4)
-        #data.build_train_iter(bs=32)
-        #data.build_test_iter(bs=32)
         model.model.fit(data.train_data,validation_data=data.test_data,epochs=4,callbacks=[wandb.keras.WandbCallback(save_model=False)])
-        data.build_train_iter(bs=1)
-        compute_metrics(data,model,epoch=(i+1)*4,FIM_bs=5,limit=metric_limit)
+        #compute_metrics(data,model,epoch=(i+1)*4,FIM_bs=5,limit=metric_limit)
     
 
 

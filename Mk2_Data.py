@@ -1,6 +1,9 @@
 #This holds the dataset and relevent functions for that data in a class
 
 import tensorflow as tf
+import tensorflow_datasets as tfds
+import pathlib
+import numpy as np
 
 class Augmentation():
     def __init__(self,augmentation_setup,pre_aug=False,):
@@ -69,6 +72,7 @@ class Data():
                 data_dir=None,train_augment=None,test_augment=None,val_augment=None,reduced=None,train_count=None,test_count=None,val_count=None):
         if not self.name_setup(dataset_name): return None
         self.dataset_name = dataset_name    #name of the dataset
+        self.dataset_root_dir = "/com.docker.devenvironments.code/data/"
 
         #Dataset Modification
         if split == None:
@@ -142,6 +146,12 @@ class Data():
             self.input_shape = None
             self.total_data_points = 11,228 
             return True
+        elif dataset_name == 'speech_commands':
+            self.x_type = 'audio'
+            self.num_classes = 8
+            self.input_shape = None
+            self.total_data_points = 8000
+            return True
 
         else:
             print('Dataset not recognised')
@@ -197,6 +207,13 @@ class Data():
             val_data = tf.data.Dataset.from_tensor_slices((x_val, y_val))
         else:
             val_data = None
+
+        #shuffle and batch data
+        train_data = train_data.shuffle(self.train_count).batch(self.batch_size)
+        test_data = test_data.batch(self.batch_size)
+        if self.split[2] != 0:
+            val_data = val_data.batch(self.batch_size)
+        self.current_train_batch_size = self.batch_size
         return train_data, test_data, val_data
 
     def get_imdb_reviews(self,max_features=10000,sequence_length=250):
@@ -224,6 +241,11 @@ class Data():
         #Create the dataset
         train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train))
         test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+
+        #shuffle and batch data
+        train_ds = train_ds.shuffle(self.train_count).batch(self.batch_size)
+        test_ds = test_ds.batch(self.batch_size)
+        self.current_train_batch_size = self.batch_size
 
         #BELOW IS NEEDED FOR TEXT INPUT
         # #sequence to text to simulate text input
@@ -293,9 +315,81 @@ class Data():
         train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train))
         test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 
+        #shuffle and batch data
+        train_data = train_data.shuffle(self.train_count).batch(self.batch_size)
+        test_data = test_data.batch(self.batch_size)
+        self.current_train_batch_size = self.batch_size
+
         return train_ds, test_ds, None
 
-    def build_data_in_mem(self):
+    def get_speech_commands(self):
+        #https://www.tensorflow.org/tutorials/audio/simple_audio?_gl=1*1890c69*_up*MQ..*_ga*MTUxMTkwNDM1Ny4xNzE3MDg3MzI4*_ga_W0YLR4190T*MTcxNzA4NzMyOC4xLjAuMTcxNzA4NzMyOC4wLjAuMA..
+        name = 'mini_speech_commands'
+        
+        #/com.docker.devenvironments.code/data/mini_speech_commands
+        data_dir = pathlib.Path(self.dataset_root_dir + name)
+        if not data_dir.exists():
+            tf.keras.utils.get_file(
+                'mini_speech_commands.zip',
+                origin="http://storage.googleapis.com/download.tensorflow.org/data/mini_speech_commands.zip",
+                extract=True,
+                cache_dir='.',
+                cache_subdir='data',
+            )
+        commands = np.array(tf.io.gfile.listdir(str(data_dir)))
+        commands = commands[(commands != 'README.md') & (commands != '.DS_Store')]
+        print('Loaded Commands:', commands)
+
+        train_ds, test_ds = tf.keras.utils.audio_dataset_from_directory(
+            data_dir,
+            validation_split=self.split[1],
+            seed=123,
+            subset='both',
+            batch_size=self.batch_size,
+            output_sequence_length=16000, #16k samples
+        )
+        self.label_names = np.array(train_ds.class_names)
+        print('Label Names:', self.label_names)
+
+        #remove the extra dimension as all smaples have 1 channel
+        def squeeze(x, y):
+            return tf.squeeze(x, axis=-1), y
+
+        train_ds = train_ds.map(squeeze,tf.data.AUTOTUNE)
+        test_ds = test_ds.map(squeeze,tf.data.AUTOTUNE)
+
+        def make_spec_ds(ds):
+            return ds.map(
+                map_func=lambda x, y: (self.get_spectrogram(x), y),
+                num_parallel_calls=tf.data.AUTOTUNE,
+            )
+        
+        train_ds = make_spec_ds(train_ds)
+        test_ds = make_spec_ds(test_ds)
+
+        train_ds = train_ds.cache().shuffle(10000).prefetch(tf.data.AUTOTUNE)
+        test_ds = test_ds.cache().prefetch(tf.data.AUTOTUNE)
+
+        #deal with adapted layers in networks
+        self.norm_layer = tf.keras.layers.Normalization()
+        self.norm_layer.adapt(train_ds.map(lambda x, _: x))
+
+        return train_ds, test_ds, None
+
+    def get_spectrogram(self,waveform):
+        # Convert the waveform to a spectrogram via a STFT.
+        spectrogram = tf.signal.stft(
+            waveform, frame_length=255, frame_step=128)
+        # Obtain the magnitude of the STFT.
+        spectrogram = tf.abs(spectrogram)
+        # Add a `channels` dimension, so that the spectrogram can be used
+        # as image-like input data with convolution layers (which expect
+        # shape (`batch_size`, `height`, `width`, `channels`).
+        spectrogram = spectrogram[..., tf.newaxis]
+        return spectrogram
+
+
+    def build_data(self):
         #build the dataset from source and hold all in memory 
         #Mainly used to pull small test datasets like mnist and cifar10
         
@@ -308,37 +402,22 @@ class Data():
                 self.train_data,self.test_data,self.val_data = self.get_imdb_reviews()
             case 'newswire':
                 self.train_data,self.test_data,self.val_data = self.get_newswire()
+            case 'speech_commands':
+                self.train_data,self.test_data,self.val_data = self.get_speech_commands()
             case _:
                 print('Dataset not recognised')
                 return None
         
-        #Augment data if needed
-        if self.train_augment != None:
-            self.train_augment.mem_augment(self.train_data,self.num_classes)
-        if self.test_augment != None:
-            self.test_augment.mem_augment(self.test_data,self.num_classes)
-        if self.val_augment != None:
-            self.val_augment.mem_augment(self.val_data,self.num_classes)
-        
-        #shuffle and batch data
-        self.train_data = self.train_data.shuffle(self.train_count).batch(self.batch_size)
-        self.current_train_batch_size = self.batch_size
-
-        self.test_data = self.test_data.shuffle(self.test_count).batch(self.batch_size)
-        if self.split[2] != 0:
-            self.val_data = self.val_data.shuffle(self.val_count).batch(self.batch_size)
-        
-
-    def build_train_iter(self,shuffle=False,bs=None):
+    def build_iter_ds(self,shuffle=False,bs=None):
         #Shuffle and batch data
         #bs = None means dont update the batch size
         if shuffle:
             self.train_data = self.train_data.shuffle(self.train_count)
         if bs != None:
-            if self.current_train_batch_size != bs:
+            if self.iter_batch_size != bs:
                 self.iter_train_data = self.train_data.unbatch()
                 self.iter_train_data = self.train_data.batch(bs)
-                self.current_train_batch_size = bs
+                self.iter_batch_size = bs
                 print('Batch size updated to: ',bs)
         #self.train_batches = self.iter_train_count//bs
         self.iter_train = iter(self.train_data)
@@ -349,31 +428,6 @@ class Data():
         self.test_data = self.test_data.shuffle(self.test_count)
         if self.split[2] != 0:
             self.val_data = self.val_data.shuffle(self.val_count)
-
-    def build_test_iter(self,shuffle=False,bs=None):
-        #Shuffle and batch data
-        #bs = None means dont update the batch size
-        if shuffle:
-            self.test_data = self.test_data.shuffle(self.test_count)
-        if bs != None:
-            if self.current_test_batch_size != bs:
-                self.test_data = self.test_data.unbatch()
-                self.test_data = self.test_data.batch(bs)
-                self.current_test_batch_size = bs
-        self.test_batches = self.test_count//bs
-        self.iter_test = iter(self.test_data)
-
-    def build_val_iter(self,shuffle=False,bs=None):
-        if self.split[2] != 0:
-            if shuffle:
-                self.val_data = self.val_data.shuffle(self.val_count)
-            if bs != None:
-                if self.current_val_batch_size != bs:
-                    self.val_data = self.val_data.unbatch()
-                    self.val_data = self.val_data.batch(bs)
-                    self.current_val_batch_size = bs
-            self.iter_val = iter(self.val_data)
-
 
     def get_item(self):
         #return the next item in the dataset
