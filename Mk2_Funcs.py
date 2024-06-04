@@ -173,13 +173,13 @@ def calc_FIM(ds,model,FIM_bs,limit=None,model_output_type='binary_logit'):
     
     data_count = 0
     s = 0
-    ds.build_iter_ds(shuffle=True,bs=FIM_bs)
+    ds.build_iter_ds(shuffle=False,bs=FIM_bs)
     for _ in range(limit//FIM_bs):
         if data_count/FIM_bs % 100 == 0:
             print(data_count)
         if model_output_type == 'binary_logit':
             z = model.Get_Z_logit(ds.get_batch())#returns [FIM_bs x 1]
-        elif model_output_type == 'softmax':
+        elif model_output_type in ['softmax','categorical']:
             z = model.Get_Z_softmax(ds.get_batch())
         else:
             z = model.Get_Z(ds.get_batch())#returns [FIM_bs x 1]

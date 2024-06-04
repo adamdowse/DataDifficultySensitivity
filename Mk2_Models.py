@@ -1079,6 +1079,7 @@ class Models():
         j = tf.square(j) #square the jacobian [BS x num_params]
         j = tf.reduce_sum(j) #sum the jacobian [BS x 1]
         return j 
+    
 
     @tf.function
     def Get_Z_logit(self,items):

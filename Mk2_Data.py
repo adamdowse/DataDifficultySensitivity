@@ -98,6 +98,8 @@ class Data():
 
         self.train_batches = None    #number of batches in the dataset
         self.test_batches = None    #number of batches in the dataset
+        self.iter_train_data = None    #iterator for the training data
+        self.iter_batch_size = None    #batch size for the iterator
 
 
 
@@ -316,8 +318,8 @@ class Data():
         test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 
         #shuffle and batch data
-        train_data = train_data.shuffle(self.train_count).batch(self.batch_size)
-        test_data = test_data.batch(self.batch_size)
+        train_ds = train_ds.shuffle(self.train_count).batch(self.batch_size)
+        test_ds = test_ds.batch(self.batch_size)
         self.current_train_batch_size = self.batch_size
 
         return train_ds, test_ds, None
@@ -414,9 +416,9 @@ class Data():
         if shuffle:
             self.train_data = self.train_data.shuffle(self.train_count)
         if bs != None:
-            if self.iter_batch_size != bs:
+            if self.iter_batch_size != bs or self.iter_train_data == None:
                 self.iter_train_data = self.train_data.unbatch()
-                self.iter_train_data = self.train_data.batch(bs)
+                self.iter_train_data = self.iter_train_data.batch(bs)
                 self.iter_batch_size = bs
                 print('Batch size updated to: ',bs)
         #self.train_batches = self.iter_train_count//bs
