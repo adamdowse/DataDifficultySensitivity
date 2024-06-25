@@ -181,6 +181,8 @@ def calc_FIM(ds,model,FIM_bs,limit=None,model_output_type='binary_logit'):
             z = model.Get_Z_logit(ds.get_batch())#returns [FIM_bs x 1]
         elif model_output_type in ['softmax','categorical']:
             z = model.Get_Z_softmax(ds.get_batch())
+        elif model_output_type == 'logits':
+            z = model.Get_Z_logits(ds.get_batch())
         else:
             z = model.Get_Z(ds.get_batch())#returns [FIM_bs x 1]
         s += tf.reduce_sum(z)

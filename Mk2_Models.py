@@ -30,11 +30,49 @@ class Models():
         self.model_init(vars=config['model_vars'])
         self.loss_func_init()
         self.model_compile()
+        
         #self.lr_schedule(0,True)
         self.max_acc = 0
         self.early_stop_count = 0
         self.pre_process_func = None
+    
+    class SAM(tf.Module):
+        def __init__(self, base_optim, rho=0.05, lam=0.1):
+            self.base_optim = base_optim
+            self.rho = rho  # ball size
+            self.lam = lam #weight decay coff
+
+        def max_step(self,model,x,y):
+            #compute grads at current point and move to the maximum in the ball
+            with tf.GradientTape() as tape:
+                y_hat = model(x,training=True)
+                loss = self.loss_func(y,y_hat)
+            gs = tape.gradient(loss, model.trainable_variables)
+            grad_norm = tf.linalg.global_norm(gs)
+            self.eps = (gs * self.rho) / (grad_norm + 1e-12)
+            for self.eps, var in zip(self.eps, vs):
+                var.assign_add(self.eps)
+            return loss,y_hat
         
+        def min_step(self,model,x,y):
+            with tf.GradientTape() as tape:
+                y_hat = model(x,training=True)
+                loss = self.loss_func(y,y_hat)
+            gs = tape.gradient(loss, model.trainable_variables)
+            #move back to the original point
+            for self.eps, var in zip(self.eps, vs):
+                var.assign_sub(self.eps)
+            #apply normal gradient step
+            self.base_optim.apply_gradients(zip(gs, model.trainable_variables))
+            return loss
+
+        def train_step(self, x,y):
+            #compute the max step
+            loss,h_hat = self.max_step(model,x,y)
+            self.min_step(model,x,y)
+            return loss,y_hat
+            
+
     def optimizer_init(self):
         print('INIT: Optimizer: ',self.config['optimizer'])
         #this needs to define the optimizer
@@ -60,6 +98,8 @@ class Models():
                 self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config['lr'])
             elif self.config['optimizer'] == 'Momentum':
                 self.optimizer = tf.keras.optimizers.SGD(learning_rate=self.config['lr'],momentum=self.config.momentum)
+            elif self.config['optimizer'] == 'SAM_SGD':
+                self.optimizer = self.SAM(tf.keras.optimizers.SGD(learning_rate=self.config['lr']),rho=0.05,lam=0.1)
             else:
                 print('Optimizer not recognised')   
 
@@ -1002,9 +1042,54 @@ class Models():
         #total_params = trainable_params + non_trainable_params
         return trainable_params
 
+    class CustomModel(tf.keras.Model):
+        def __init__(self,model,optimizer,loss_func):
+            super().__init__()
+            self.model = model
+            self.optimizer = optimizer
+            self.loss_func = loss_func
+            self.train_loss_metric = tf.keras.metrics.Mean(name='train_loss')
+            self.train_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='train_acc')
+            self.train_prec_metric = tf.keras.metrics.Precision(name='train_prec')
+            self.train_rec_metric = tf.keras.metrics.Recall(name='train_rec')
+
+            self.test_loss_metric = tf.keras.metrics.Mean(name='test_loss')
+            self.test_acc_metric = tf.keras.metrics.CategoricalAccuracy(name='test_acc')
+            self.test_prec_metric = tf.keras.metrics.Precision(name='test_prec')
+            self.test_rec_metric = tf.keras.metrics.Recall(name='test_rec')
+        
+        def call(self,inputs,training=False):
+            return self.model(inputs,training=training)
+        
+        def train_step(self,items):
+            x,y = items
+            loss,y_hat = self.optimizer.train_step(self,x,y)
+            
+            #update metrics
+            self.train_loss_metric.update_state(loss)
+            self.train_acc_metric.update_state(y,y_hat)
+            self.train_prec_metric.update_state(y,y_hat)
+            self.train_rec_metric.update_state(y,y_hat)
+
+
+        @property
+        def metrics(self):
+            return [self.train_loss_metric,
+                self.train_acc_metric,
+                self.train_prec_metric,
+                self.train_rec_metric,
+                self.test_loss_metric,
+                self.test_acc_metric,
+                self.test_prec_metric,
+                self.test_rec_metric]
+            
+            
+
+
     def model_compile(self):
         #self.model.summary()
         #self.model.compile(optimizer=self.optimizer,loss=self.loss_func)
+        self.model = self.CustomModel(self.model,self.optimizer,self.loss_func)
         self.model.compile(optimizer=self.optimizer,loss=self.loss_func,metrics=self.metrics_init())
         print('Model compiled')
         print(self.model.summary())
@@ -1296,6 +1381,15 @@ class Models():
     #     self.train_acc_metric.update_state(labels,preds)
     #     self.train_prec_metric.update_state(labels,preds)
     #     self.train_rec_metric.update_state(labels,preds)
+    @tf.function
+    def SAMUpdate(self,items,lam):
+        imgs,labels = items
+        with tf.GradientTape() as tape:
+            preds = self.model(imgs,training=True)
+            loss = self.loss_func(labels,preds)
+        grads = tape.gradient(loss,self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables))
+        return loss
 
     def train_epochs(self,data,epochs,current_epoch):
         data.build_train_iter(bs=32,shuffle=True)

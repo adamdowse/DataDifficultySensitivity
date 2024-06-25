@@ -212,22 +212,23 @@ tds = tf.data.Dataset.from_tensor_slices((tds,tds)).shuffle(1000).batch(32)
 
 #this is an auto encoder that attempts to reconstruct the input via a latent space
 #the loss is the mean squared error between the input and the output
-encoding_dim = 32
+encoding_dim = 8
 input_layer = tf.keras.layers.Input(shape=(num_cols,))
 encoder = tf.keras.layers.Dense(encoding_dim,activation='relu')(input_layer)
 encoder = tf.keras.layers.Dense(encoding_dim//2,activation='relu')(encoder)
 encoder = tf.keras.layers.Dense(encoding_dim//4,activation='relu')(encoder)
 decoder = tf.keras.layers.Dense(encoding_dim//2,activation='relu')(encoder)
-decoder = tf.keras.layers.Dense(encoding_dim,activation='relu')(decoder)
+decoder = tf.keras.layers.Dense(encoding_dim,activation='relu')(encoder)
 decoder = tf.keras.layers.Dense(num_cols,activation='sigmoid')(decoder)
 autoencoder = tf.keras.models.Model(inputs=input_layer,outputs=decoder)
-autoencoder.compile(optimizer='adam',loss='mse')
+opt = tf.keras.optimizers.Adam(learning_rate=0.01)
+autoencoder.compile(optimizer=opt ,loss='mse')
 print(autoencoder.summary())
 
 
 
 
-def autoencoder_FIM(model,X):
+def autoencoder_FIM(model,X,t=0):
     #this function calculates the FIM of the autoencoder
     #the FIM is calculated as the sum of the squared gradients of the output with respect to the input
     #this is a monte carlo estimation of the FIM
@@ -240,16 +241,31 @@ def autoencoder_FIM(model,X):
     for x in X:
         x = tf.convert_to_tensor(x,dtype=tf.float32)
         x = tf.expand_dims(x,0)
-        with tf.GradientTape() as tape:
-            tape.watch(x)
-            y_hat = model(x) #0-1 range
-            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat),1)) #sample from distribution
-            output = tf.math.log(tf.gather(y_hat,selected,axis=1))
+        if t == 0:
+            with tf.GradientTape() as tape:
+                tape.watch(x)
+                y_hat = model(x) #0-1 range
+                #loss = 1 -(x-y_hat)**2
+                #selected = tf.random.categorical(loss,1) #sample from distribution 
+                selected = tf.random.uniform([1],0,num_cols,dtype=tf.int32)
+                #selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat),1)) #sample from distribution
+                output = tf.math.log(tf.gather(y_hat,selected,axis=1))
+        elif t==1:
+            with tf.GradientTape() as tape:
+                tape.watch(x)
+                y_hat = model(x) #0-1 range
+                loss = 1 -(x-y_hat)**2
+                selected = tf.random.categorical(loss,1) #sample from distribution 
+                #selected = tf.random.uniform([1],0,num_cols,dtype=tf.int32)
+                #selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat),1)) #sample from distribution
+                output = tf.math.log(tf.gather(y_hat,selected,axis=1))
+        else:
+            print('Invalid t')
         g = tape.gradient(output,model.trainable_variables)
         #just the encoder layers
-        ge = tf.concat([tf.reshape(gv,[-1]) for gv in g[:5]],axis=0)
+        ge = tf.concat([tf.reshape(gv,[-1]) for gv in g[:4]],axis=0)
         #just the decoder layers
-        gd = tf.concat([tf.reshape(gv,[-1]) for gv in g[5:]],axis=0)
+        gd = tf.concat([tf.reshape(gv,[-1]) for gv in g[4:]],axis=0)
         g = tf.concat([tf.reshape(gv,[-1]) for gv in g],axis=0)
         FIMe += tf.reduce_sum(ge**2)
         FIMd += tf.reduce_sum(gd**2)
@@ -261,26 +277,43 @@ def autoencoder_FIM(model,X):
     return FIM,FIMe,FIMd
 
 #train the autoencoder
-f2,(ax1,ax2) = plt.subplots(2,1,figsize=(10,10))
-FIMs = []
-FIMes = []
-FIMds = []
+f2,(ax1,ax2,ax3) = plt.subplots(3,1,figsize=(10,10))
+FIMs0 = []
+FIMes0 = []
+FIMds0 = []
+FIMs1 = []
+FIMes1 = []
+FIMds1 = []
 losses = []
 
-for i in range(100):
-    print('Epoch: ',i*10)
-    hist = autoencoder.fit(tds,epochs=10,verbose=0)
+steps_per_cycle = 50
+for i in range(200):
+    print('Epoch: ',i*steps_per_cycle)
+    hist = autoencoder.fit(tds,epochs=steps_per_cycle,verbose=0)
     print('Loss: ',hist.history['loss'])
-    FIM,FIMe,FIMd = autoencoder_FIM(autoencoder,ds.values)
+    FIM0,FIMe0,FIMd0 = autoencoder_FIM(autoencoder,ds.values,t=0)
+    FIM1,FIMe1,FIMd1 = autoencoder_FIM(autoencoder,ds.values,t=1)
     losses.append(hist.history['loss'])
-    FIMs.append(FIM)
-    FIMes.append(FIMe)
-    FIMds.append(FIMd)
+    FIMs0.append(FIM0)
+    FIMes0.append(FIMe0)
+    FIMds0.append(FIMd0)
+    FIMs1.append(FIM1)
+    FIMes1.append(FIMe1)
+    FIMds1.append(FIMd1)
 
 ax1.plot(losses)
-ax2.plot(FIMs,label='TotalFIM')
-ax2.plot(FIMes,label='EncoderFIM')
-ax2.plot(FIMds,label='DecoderFIM')
+ax2.plot(FIMs0,label='TotalFIM',color='black')
+ax2.plot(FIMes0,label='EncoderFIM')
+ax2.plot(FIMds0,label='DecoderFIM')
+ax2.set_title('FIM - P(Uniform)')
+ax2.legend()
+ax2.set_yscale('log')
+ax3.plot(FIMs1,label='TotalFIM',color='black')
+ax3.plot(FIMes1,label='EncoderFIM')
+ax3.plot(FIMds1,label='DecoderFIM')
+ax3.set_title('FIM - P(1-loss)')
+ax3.legend()
+ax3.set_yscale('log')
 f2.savefig('WineClusteringDSAutoencoder.png')
 
 

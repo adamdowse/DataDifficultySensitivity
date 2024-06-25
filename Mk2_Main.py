@@ -8,7 +8,7 @@ import wandb
 import os
 
 import Mk2_Data as DataClass
-import Mk2_Models as ModelClass
+import Mk3_Models as customModels
 import Mk2_Funcs as FC
 
 
@@ -42,7 +42,7 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
     # wandb.log({'S_matrix_trace':S},step=epoch)
 
     # #F matrix
-    F = FC.calc_FIM(data,model,FIM_bs,limit=limit,model_output_type='softmax')
+    F = FC.calc_FIM(data,model,FIM_bs,limit=limit,model_output_type='logits')
     print('F matrix trace: ',F)
     wandb.log({'F_matrix_trace':F},step=epoch)
 
@@ -68,17 +68,18 @@ def main(config):
     data.build_data()
 
     print('Building Model')
-    model = ModelClass.Models(config,strategy,data)
+    model = customModels.build_model(config)
+    
     metric_limit = 1000
     compute_metrics(data,model,epoch=0,FIM_bs=5,limit=metric_limit)
 
     #train model
     epochs_per_step = 1
-    for i in range(25):
+    for i in range(20):
         #TODO There is a memory leak most likely with dataset building each epoch
         #tf error in converting index slices to tensors
         print('Training Epoch: ',(i+1)*epochs_per_step)
-        model.model.fit(data.train_data,validation_data=data.test_data,epochs=epochs_per_step,callbacks=[wandb.keras.WandbCallback(save_model=False)])
+        model.fit(data.train_data,validation_data=data.test_data,epochs=epochs_per_step,callbacks=[wandb.keras.WandbCallback(save_model=False)])
         compute_metrics(data,model,epoch=(i+1)*epochs_per_step,FIM_bs=5,limit=metric_limit)
     
 
@@ -90,18 +91,19 @@ if __name__ == '__main__':
     wandb.login()
 
     config = {'loss_func':'categorical_crossentropy',
-                'data_name':'newswire',
+                'data_name':'mnist',
                 'acc_sample_weight':None,
-                'optimizer':'Adam',
-                'lr':0.0001,
+                'optimizer':'SAM_SGD',
+                'lr':0.001,
                 'lr_decay_type':'fixed',
                 'batch_size':32,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'newswireConv1D',
-                'model_vars': [10000,250,16], #var = [max_features,sequence_length,embedding_dim]
-                'num_classes':46,
-                'img_size':None,
+                'model_name':'Dense1',
+                'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
+                'num_classes':10,
+                'img_size':(28,28,1),
+                'rho':0.05,
                 }
-    wandb.init(project="DomainFIMs",config=config)
+    wandb.init(project="SAM",config=config)
     main(config)
