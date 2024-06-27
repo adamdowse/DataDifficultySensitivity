@@ -11,8 +11,6 @@ import Mk2_Data as DataClass
 import Mk3_Models as customModels
 import Mk2_Funcs as FC
 
-
-
 def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 
     
@@ -42,7 +40,7 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
     # wandb.log({'S_matrix_trace':S},step=epoch)
 
     # #F matrix
-    F = FC.calc_FIM(data,model,FIM_bs,limit=limit,model_output_type='logits')
+    F = FC.calc_FIM(data,model,FIM_bs,limit=limit,model_output_type='softmax')
     print('F matrix trace: ',F)
     wandb.log({'F_matrix_trace':F},step=epoch)
 
@@ -69,17 +67,18 @@ def main(config):
 
     print('Building Model')
     model = customModels.build_model(config)
+    model.model.summary()
     
     metric_limit = 1000
-    compute_metrics(data,model,epoch=0,FIM_bs=5,limit=metric_limit)
-
+    #compute_metrics(data,model,epoch=0,FIM_bs=5,limit=metric_limit)
+    
     #train model
     epochs_per_step = 1
-    for i in range(20):
+    for i in range(40):
         #TODO There is a memory leak most likely with dataset building each epoch
         #tf error in converting index slices to tensors
         print('Training Epoch: ',(i+1)*epochs_per_step)
-        model.fit(data.train_data,validation_data=data.test_data,epochs=epochs_per_step,callbacks=[wandb.keras.WandbCallback(save_model=False)])
+        model.fit(data.train_data,batch_size=config['batch_size'],validation_data=data.test_data,epochs=epochs_per_step,callbacks=[wandb.keras.WandbCallback(save_model=False)])
         compute_metrics(data,model,epoch=(i+1)*epochs_per_step,FIM_bs=5,limit=metric_limit)
     
 
@@ -90,10 +89,11 @@ if __name__ == '__main__':
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
     wandb.login()
 
-    config = {'loss_func':'categorical_crossentropy',
+    config = {'group':'FSAMrho',
+                'loss_func':'categorical_crossentropy',
                 'data_name':'mnist',
                 'acc_sample_weight':None,
-                'optimizer':'SAM_SGD',
+                'optimizer':'FSAM_SGD',
                 'lr':0.001,
                 'lr_decay_type':'fixed',
                 'batch_size':32,
@@ -103,7 +103,8 @@ if __name__ == '__main__':
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(28,28,1),
-                'rho':0.05,
+                'rho':0.01,
+                'rho_decay':1,
                 }
     wandb.init(project="SAM",config=config)
     main(config)

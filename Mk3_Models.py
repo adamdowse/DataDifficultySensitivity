@@ -44,7 +44,7 @@ class Model(tf.keras.Model):
                 loss = self.compiled_loss(y, y_hat)
             gradients = tape.gradient(loss, self.model.trainable_variables)
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-        elif self.config['optimizer'] == 'SAM_SGD':
+        elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
         
         else:
@@ -85,7 +85,6 @@ class Model(tf.keras.Model):
         with tf.GradientTape() as tape:
             #print(text_batch[i])
             y_hat = self.model(x,training=False) #get model output (softmax) [BS x num_classes]
-            print(y_hat)
             selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
             output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
             output = tf.math.log(output) #log the output [BS x 1]
@@ -131,10 +130,11 @@ def build_model(config):
     return model
 
 class SAM(tf.keras.optimizers.Optimizer):
-    def __init__(self, base_optim, rho=0.05, name="SAM", **kwargs):
+    def __init__(self, base_optim, config, name="SAM", **kwargs):
         super().__init__(name, **kwargs)
         self.base_optim = base_optim
-        self.rho = rho  # ball size
+        self.rho = config['rho']  # ball size
+        self.rho_decay = config['rho_decay']
         self.title = f"SAM_SGD"
 
     @tf.function
@@ -172,6 +172,140 @@ class SAM(tf.keras.optimizers.Optimizer):
         #compute the max step
         loss,y_hat,eps = self.max_step(model,x,y,loss_func)
         self.min_step(model,x,y,loss_func,eps)
+        self.rho = self.rho * self.rho_decay
+        return loss,y_hat
+
+class ASAM(tf.keras.optimizers.Optimizer):
+    #Adaptive SAM
+    def __init__(self, base_optim, config, name="ASAM", **kwargs):
+        super().__init__(name, **kwargs)
+        self.base_optim = base_optim
+        self.rho = config['rho']  # ball size
+        self.rho_decay = config['rho_decay']
+        self.title = f"ASAM_SGD"
+
+    @tf.function
+    def max_step(self,model,x,y,loss_func):
+        #compute grads at current point and move to the maximum in the ball
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+        tf.print('Gradients: ',[e for e in gs])
+        #flatten model weights
+        #flat_weights = tf.concat([tf.reshape(v,[-1]) for v in model.trainable_variables],axis=0)
+        t_w = [tf.math.abs(l) for l in model.trainable_variables]
+        t_w_l = [tf.math.multiply(tl,gl) for tl,gl in zip(t_w,gs)]
+        t_norm = tf.norm(tf.concat([tf.reshape(t,[-1]) for t in t_w_l],axis=0))
+
+        eps = [self.rho * tf.math.multiply(t,t_l) for t,t_l in zip(t_w,t_w_l)]
+        eps = [tf.math.divide(e,t_norm) for e in eps]
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+        #print('EPS: ',[e.shape for e in self.eps])
+        #print('Model Trainable Variables: ',[e.shape for e in model.trainable_variables])
+
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var + eps, (model.trainable_variables, self.eps))
+        return loss,y_hat,eps
+    
+    @tf.function
+    def min_step(self,model,x,y,loss_func,eps):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+        #move back to the original point
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var - eps, (model.trainable_variables, self.eps))
+        #apply normal gradient step
+        self.base_optim.apply_gradients(zip(gs, model.trainable_variables))
+
+    def step(self, x, y, model, loss_func):
+        #compute the max step
+        loss,y_hat,eps = self.max_step(model,x,y,loss_func)
+        self.min_step(model,x,y,loss_func,eps)
+        self.rho = self.rho * self.rho_decay
+        return loss,y_hat
+
+class FSAM(tf.keras.optimizers.Optimizer):
+    #Fisher SAM
+    def __init__(self, base_optim, config, name="FSAM", **kwargs):
+        super().__init__(name, **kwargs)
+        self.base_optim = base_optim
+        self.rho = config['rho']  # ball size
+        self.rho_decay = config['rho_decay']
+        self.title = f"FSAM_SGD"
+        self.print_flag = True
+        self.r = 1 #reg term
+
+    #@tf.function
+    def max_step(self,model,x,y,loss_func):
+        #compute grads at current point and move to the maximum in the ball
+        #compute fisher
+        # with tf.GradientTape() as tape:
+        #     y_hat = model(x,training=True)
+        #     loss = loss_func(y,y_hat)
+        # gs = tape.gradient(loss, model.trainable_variables)
+        # i_fisher = [tf.square(i) for i in gs]
+        # i_fisher = [tf.math.reciprocal(tf.add(i*self.r,1)) for i in i_fisher]
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
+            output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
+            output = tf.math.log(output) #log the output [BS x 1]
+        j = tape.jacobian(output,model.trainable_variables) #get the jacobian of the output wrt the model params [BS x num_layer_params x layers]
+        j = [tf.reduce_mean(i,axis=0) for i in j]#average over the batch
+        j = [tf.square(i) for i in j]
+        i_fisher = [tf.math.reciprocal(tf.add(i*self.r,1)) for i in j]
+        
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+
+
+        eps_u = [self.rho * tf.math.multiply(tl,gl) for tl,gl in zip(i_fisher,gs)]
+        eps_l = [tf.math.sqrt(tf.math.multiply(tf.math.multiply(tl,gl),gl)) for tl,gl in zip(i_fisher,gs)]
+        eps = [tf.math.divide(u,l+1.e-12) for u,l in zip(eps_u,eps_l)]
+
+        # if self.print_flag:
+        #     self.print_flag = False
+        #     tf.print('y_hat: ',y_hat)
+        #     tf.print('Loss: ',loss)
+        #     tf.print('Params: ',[e.shape for e in model.trainable_variables])
+        #     tf.print('Gradients: ',[e for e in gs])
+        #     tf.print('Fisher Information: ',[e for e in i_fisher])
+        #     tf.print('EPS_u: ',[e for e in eps_u])
+        #     tf.print('EPS_l: ',[e for e in eps_l])
+        #     tf.print('EPS: ',[e for e in eps])
+
+        
+        
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+
+        return loss,y_hat,eps
+    
+    @tf.function
+    def min_step(self,model,x,y,loss_func,eps):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+        #move back to the original point
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var - eps, (model.trainable_variables, self.eps))
+        #apply normal gradient step
+        self.base_optim.apply_gradients(zip(gs, model.trainable_variables))
+
+    def step(self, x, y, model, loss_func):
+        #compute the max step
+        loss,y_hat,eps = self.max_step(model,x,y,loss_func)
+        self.min_step(model,x,y,loss_func,eps)
+        self.rho = self.rho * self.rho_decay
+
         return loss,y_hat
 
 
@@ -1062,4 +1196,8 @@ def optimizer_selector(optimizer_name,config,lr_schedule):
         case 'SGD':
             return tf.keras.optimizers.SGD(learning_rate=lr_schedule)
         case 'SAM_SGD':
-            return SAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),rho=config['rho'])
+            return SAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+        case 'FSAM_SGD':
+            return FSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+        case 'ASAM_SGD':
+            return ASAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
