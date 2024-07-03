@@ -74,12 +74,12 @@ def main(config):
     
     #train model
     epochs_per_step = 1
-    for i in range(40):
+    for i in range(25):
         #TODO There is a memory leak most likely with dataset building each epoch
         #tf error in converting index slices to tensors
         print('Training Epoch: ',(i+1)*epochs_per_step)
         model.fit(data.train_data,batch_size=config['batch_size'],validation_data=data.test_data,epochs=epochs_per_step,callbacks=[wandb.keras.WandbCallback(save_model=False)])
-        compute_metrics(data,model,epoch=(i+1)*epochs_per_step,FIM_bs=5,limit=metric_limit)
+        #compute_metrics(data,model,epoch=(i+1)*epochs_per_step,FIM_bs=5,limit=metric_limit)
     
 
 
@@ -89,12 +89,12 @@ if __name__ == '__main__':
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
     wandb.login()
 
-    config = {'group':'FSAMrho',
+    config = {'group':'mSAMmsize',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'mnist',
                 'acc_sample_weight':None,
-                'optimizer':'FSAM_SGD',
-                'lr':0.001,
+                'optimizer':'mSAM_SGD',
+                'lr':0.01,
                 'lr_decay_type':'fixed',
                 'batch_size':32,
                 'label_smoothing':None,
@@ -103,8 +103,10 @@ if __name__ == '__main__':
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(28,28,1),
-                'rho':0.01,
+                'rho':0.05,
                 'rho_decay':1,
+                'm':32, # must be less than batch size
+                
                 }
     wandb.init(project="SAM",config=config)
     main(config)

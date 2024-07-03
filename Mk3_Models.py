@@ -44,7 +44,7 @@ class Model(tf.keras.Model):
                 loss = self.compiled_loss(y, y_hat)
             gradients = tape.gradient(loss, self.model.trainable_variables)
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-        elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD']:
+        elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
         
         else:
@@ -174,6 +174,114 @@ class SAM(tf.keras.optimizers.Optimizer):
         self.min_step(model,x,y,loss_func,eps)
         self.rho = self.rho * self.rho_decay
         return loss,y_hat
+
+class mSAM(tf.keras.optimizers.Optimizer):
+    #mSAM uses a small amount of data than the batch to perform the maximisation step
+    def __init__(self, base_optim, config, name="mSAM", **kwargs):
+        super().__init__(name, **kwargs)
+        self.base_optim = base_optim
+        self.rho = config['rho']  # ball size
+        self.rho_decay = config['rho_decay']
+        self.m = config['m']
+        self.title = f"mSAM_SGD"
+        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
+        
+
+    @tf.function
+    def max_step(self,model,x,y,loss_func):
+        #compute grads at current point and move to the maximum in the ball
+        #reduce the batch size to m
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = self.nored_loss(y,y_hat)
+            index = tf.random.uniform([self.m],0,tf.shape(x)[0],dtype=tf.int32)
+            loss = tf.gather(loss,index)
+            loss = tf.reduce_mean(loss)#mean the losses
+        gs = tape.gradient(loss, model.trainable_variables)
+        grad_norm = tf.linalg.global_norm(gs)
+        eps = [(g * self.rho)/ (grad_norm + 1e-12) for g in gs]
+
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+        #print('EPS: ',[e.shape for e in self.eps])
+        #print('Model Trainable Variables: ',[e.shape for e in model.trainable_variables])
+
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var + eps, (model.trainable_variables, self.eps))
+        return loss,y_hat,eps
+    
+    @tf.function
+    def min_step(self,model,x,y,loss_func,eps):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+        #move back to the original point
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var - eps, (model.trainable_variables, self.eps))
+        #apply normal gradient step
+        self.base_optim.apply_gradients(zip(gs, model.trainable_variables))
+
+    def step(self, x, y, model, loss_func):
+        #compute the max step
+        loss,y_hat,eps = self.max_step(model,x,y,loss_func)
+        self.min_step(model,x,y,loss_func,eps)
+        self.rho = self.rho * self.rho_decay
+        return loss,y_hat
+
+class lmSAM(tf.keras.optimizers.Optimizer):
+    #mSAM uses a small amount of data than the batch to perform the maximisation step
+    def __init__(self, base_optim, config, name="lmSAM", **kwargs):
+        super().__init__(name, **kwargs)
+        self.base_optim = base_optim
+        self.rho = config['rho']  # ball size
+        self.rho_decay = config['rho_decay']
+        self.m = config['m']
+        self.title = f"lmSAM_SGD"
+        #currently only uses catcrossent
+        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
+        
+
+    @tf.function
+    def max_step(self,model,x,y,loss_func):
+        #compute grads at current point and move to the maximum in the ball
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = self.nored_loss(y,y_hat)
+        loss = tf.math.top_k(loss, self.m).values #only take the m largest losses
+        loss = tf.reduce_mean(loss)#mean the losses
+        gs = tape.gradient(loss, model.trainable_variables)
+        grad_norm = tf.linalg.global_norm(gs)
+        eps = [(g * self.rho)/ (grad_norm + 1e-12) for g in gs]
+
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+        #print('EPS: ',[e.shape for e in self.eps])
+        #print('Model Trainable Variables: ',[e.shape for e in model.trainable_variables])
+
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var + eps, (model.trainable_variables, self.eps))
+        return loss,y_hat,eps
+    
+    @tf.function
+    def min_step(self,model,x,y,loss_func,eps):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+        #move back to the original point
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var - eps, (model.trainable_variables, self.eps))
+        #apply normal gradient step
+        self.base_optim.apply_gradients(zip(gs, model.trainable_variables))
+
+    def step(self, x, y, model, loss_func):
+        #compute the max step
+        loss,y_hat,eps = self.max_step(model,x,y,loss_func)
+        self.min_step(model,x,y,loss_func,eps)
+        self.rho = self.rho * self.rho_decay
+        return loss,y_hat
+
 
 class ASAM(tf.keras.optimizers.Optimizer):
     #Adaptive SAM
@@ -1201,3 +1309,5 @@ def optimizer_selector(optimizer_name,config,lr_schedule):
             return FSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
         case 'ASAM_SGD':
             return ASAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+        case 'mSAM_SGD':
+            return mSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
