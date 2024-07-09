@@ -6,13 +6,38 @@ import pathlib
 import numpy as np
 
 class Augmentation():
-    def __init__(self,augmentation_setup,pre_aug=False,):
+    def __init__(self,config,pre_aug=False,):
         self.pre_aug = pre_aug    #if true, augment in file location before loading
-        self.augmentation_setup = augmentation_setup #[augmentation1,augmentation2,...]
+        self.config = config
+        self.aug = self.data_augment()    #augmentation strategy for the data
+        # NEED TO SORT AUGMENTS Proberbly remove mem augment and just sequential model for this
 
     def dir_augment(self):
         #augment the data in the directory
         pass
+    
+    def data_augment(self):
+        print('building augmentation model')
+        #augment the data in the data pipeline
+        aug = tf.keras.Sequential()
+        for aug_name in self.config['augs'].keys():
+            if aug_name == 'flip':
+                aug.add(tf.keras.layers.RandomFlip('horizontal'))
+            elif aug_name == 'rotate':
+                aug.add(tf.keras.layers.experimental.preprocessing.RandomRotation(0.2))
+            elif aug_name == 'zoom':
+                aug.add(tf.keras.layers.experimental.preprocessing.RandomZoom(0.2))
+            elif aug_name == 'crop':
+                aug.add(tf.keras.layers.RandomCrop(32,32)) #padding=4
+            elif aug_name == 'noise':
+                aug.add(tf.keras.layers.GaussianNoise(0.1))
+            elif aug_name == 'labelCorr':
+                aug.add(tf.keras.layers.experimental.preprocessing.RandomTranslation(0.1,0.1))
+            elif aug_name == 'resize':
+                aug.add(tf.keras.layers.experimental.preprocessing.Resizing(32,32))
+            else:
+                print('Augmentation not recognised, skipping...')
+        return aug
     
     def mem_augment(self,ds,num_classes):
         #augment the data in memory
@@ -68,30 +93,28 @@ class Augmentation():
 
 
 class Data():
-    def __init__(self,dataset_name,batch_size,hold_in_mem=True,split=None,strategy=None,
-                data_dir=None,train_augment=None,test_augment=None,val_augment=None,reduced=None,train_count=None,test_count=None,val_count=None):
-        if not self.name_setup(dataset_name): return None
-        self.dataset_name = dataset_name    #name of the dataset
+    def __init__(self,config,strategy=None,data_dir=None):
+        self.config = config
+        if not self.name_setup(config['data_name']): return None
+        self.dataset_name = config['data_name']    #name of the dataset
         self.dataset_root_dir = "/com.docker.devenvironments.code/data/"
 
         #Dataset Modification
-        if split == None:
+        if config['data_split'] == None:
             self.split=[0.8,0.2,0]  #if not None, [train, test,val]
         else:
-            self.split = split
-        self.train_count = train_count
-        self.test_count = test_count
-        self.val_count = val_count
-        self.reduced = reduced    #percentage to reduce the dataset by if not None
-        self.train_augment = train_augment    #augmentation strategy class or None if not needed
-        self.test_augment = test_augment    #augmentation strategy class or None if not needed
-        self.val_augment = val_augment    #augmentation strategy class or None if not needed
+            self.split = config['data_split']
+        self.train_count = None #These can be changed to reduce the size based on the split data
+        self.test_count = None
+        self.val_count = None
+        self.reduced = None    #percentage to reduce the dataset by if not None
+        if config['augs'] != None:
+            self.augmentation = Augmentation(self.config)    #augmentation strategy class or None if not needed
 
-        self.hold_in_mem = hold_in_mem  #if true, load all data into memory
         self.strategy = strategy    #strategy for distributing data
         self.data_dir = data_dir    #directory of the dataset, or None if not needed
 
-        self.batch_size = batch_size    #batch size for the data
+        self.batch_size = config['batch_size']    #batch size for the data
         self.current_train_batch_size = 0    #current batch size for the data
         self.current_test_batch_size = 0    #current batch size for the data
         self.current_val_batch_size = None    #current batch size for the data
@@ -390,6 +413,78 @@ class Data():
         spectrogram = spectrogram[..., tf.newaxis]
         return spectrogram
 
+    def get_CIFAR10(self):
+        #returns the CIFAR10 dataset in tf format as onehot and normalised
+        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+        print(y_train[0].shape)
+
+        #Resize data if needed
+        if self.train_count != None:
+            if len(x_train) > self.train_count:
+                x_train = x_train[:self.train_count]
+                y_train = y_train[:self.train_count]
+            else:
+                print('Train count is larger than dataset size so original size is used')
+        else:
+            self.train_count = len(x_train)
+            print('Train count not specified, using full dataset')
+        
+        if self.test_count != None:
+            if len(x_test) > self.test_count:
+                x_test = x_test[:self.test_count]
+                y_test = y_test[:self.test_count]
+            else:
+                print('Test count is larger than dataset size so original size is used')
+        else:
+            self.test_count = len(x_test)
+            print('Test count not specified, using full dataset')
+        
+        if self.val_count != None and self.split[2] != 0:
+            if len(x_val) > self.val_count:
+                x_val = x_val[:self.val_count]
+                y_val = y_val[:self.val_count]
+            else:
+                print('Val count is larger than dataset size so original size is used')
+
+        #map x to float32 and normalise
+        x_train = tf.cast(x_train,tf.float32)/255
+        x_test = tf.cast(x_test,tf.float32)/255
+        if self.split[2] != 0:
+            x_val = tf.cast(x_val,tf.float32)/255
+
+        #map y to one hot
+        y_train = tf.one_hot(y_train,10)
+        y_test = tf.one_hot(y_test,10)
+        if self.split[2] != 0:
+            y_val = tf.one_hot(y_val,self.num_classes)
+        
+        #need to remove the extra dimension
+        y_train = tf.squeeze(y_train,axis=1)
+        y_test = tf.squeeze(y_test,axis=1)
+        if self.split[2] != 0:
+            y_val = tf.squeeze(y_val,axis=1)
+
+        #Convert to tf dataset
+        train_data = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        test_data = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+        if self.split[2] != 0:
+            val_data = tf.data.Dataset.from_tensor_slices((x_val, y_val))
+        else:
+            val_data = None
+        
+        #augment the data
+        if self.config['augs'] != None:
+            print('Augmenting data')
+            train_data = train_data.map(lambda x,y:(self.augmentation.aug(x), y) , num_parallel_calls=tf.data.AUTOTUNE)
+
+        #shuffle and batch data
+        train_data = train_data.shuffle(self.train_count).batch(self.batch_size)
+        test_data = test_data.batch(self.batch_size)
+        if self.split[2] != 0:
+            val_data = val_data.batch(self.batch_size)
+        self.current_train_batch_size = self.batch_size
+
+        return train_data, test_data, val_data
 
     def build_data(self):
         #build the dataset from source and hold all in memory 
@@ -406,6 +501,8 @@ class Data():
                 self.train_data,self.test_data,self.val_data = self.get_newswire()
             case 'speech_commands':
                 self.train_data,self.test_data,self.val_data = self.get_speech_commands()
+            case 'cifar10':
+                self.train_data,self.test_data,self.val_data = self.get_CIFAR10()
             case _:
                 print('Dataset not recognised')
                 return None

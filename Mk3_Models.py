@@ -22,15 +22,17 @@ class Model(tf.keras.Model):
         self.model = model
         self.config = config
         self.load_metrics(self.config)
+        self.max_train_accuracy = 0
+        self.max_test_accuracy = 0
 
     def load_metrics(self,config):
         self.metrics_list = []
         #loss logs
         self.metrics_list.append(tf.keras.metrics.Mean(name='loss'))
+        
         #accuracy logs
         if config['loss_func'] == 'categorical_crossentropy':
             self.metrics_list.append(tf.keras.metrics.CategoricalAccuracy(name='accuracy'))
-
 
     def compile(self,optimizer,loss,metrics=None):
         super().compile(optimizer=optimizer,loss=loss,metrics=metrics)
@@ -184,7 +186,7 @@ class mSAM(tf.keras.optimizers.Optimizer):
         self.rho_decay = config['rho_decay']
         self.m = config['m']
         self.title = f"mSAM_SGD"
-        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
+        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
         
 
     @tf.function
@@ -193,6 +195,8 @@ class mSAM(tf.keras.optimizers.Optimizer):
         #reduce the batch size to m
         with tf.GradientTape() as tape:
             y_hat = model(x,training=True)
+            print('Y_HAT: ',y_hat)
+            print('Y: ',y)
             loss = self.nored_loss(y,y_hat)
             index = tf.random.uniform([self.m],0,tf.shape(x)[0],dtype=tf.int32)
             loss = tf.gather(loss,index)
@@ -434,6 +438,14 @@ def lr_selector(lr_name,config):
             return config['lr']
         case 'exp_decay':
             return tf.keras.optimizers.schedules.ExponentialDecay(config['lr'],decay_steps=config['lr_decay_type'][0],decay_rate=config['lr_decay_type'][1],staircase=True)
+        case 'percentage_step_decay':
+            lr_decay_rate = config['lr_decay_params']['lr_decay_rate']
+            lr_decay_epochs_percent = config['lr_decay_params']['lr_decay_epochs_percent']
+            return tf.keras.optimizers.schedules.PiecewiseConstantDecay(
+                [int(lr_decay_epochs_percent[0]*config['epochs']),int(lr_decay_epochs_percent[1]*config['epochs'])],
+                [config['lr'],config['lr']*lr_decay_rate,config['lr']*lr_decay_rate**2]
+                )
+
 
 def model_selector(model_name,config):
     #this needs to define the model
@@ -986,12 +998,13 @@ def model_selector(model_name,config):
     #     self.output_is_logits = False
     #     self.new_img_size = self.img_shape
         
-    # elif config['model_name'] == "ResNet18":
-    #     #build resnet18 model
-    #     inputs = keras.Input(shape=self.img_shape)
-    #     outputs = build_resnet(inputs,[2,2,2,2],self.num_classes,config.weight_decay)
-    #     self.model = keras.Model(inputs, outputs)
-    #     self.output_is_logits = False
+    elif config['model_name'] == "ResNet18":
+        #build resnet18 model
+        inputs = keras.Input(shape=config['img_size'])
+        outputs = build_resnet(inputs,[2,2,2,2],config['num_classes'],config['weight_reg'])
+
+        model = keras.Model(inputs, outputs)
+        output_is_logits = False
     # elif config['model_name'] == "ResNetV1-14":
     #     #https://www.kaggle.com/code/filippokevin/cifar-10-resnet-14/notebook
     #     inputs = keras.Input(shape=self.img_shape)
@@ -1310,4 +1323,4 @@ def optimizer_selector(optimizer_name,config,lr_schedule):
         case 'ASAM_SGD':
             return ASAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
         case 'mSAM_SGD':
-            return mSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+            return mSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)

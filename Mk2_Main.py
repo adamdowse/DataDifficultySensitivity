@@ -6,6 +6,7 @@ import tensorflow as tf
 import time
 import wandb
 import os
+import argparse
 
 import Mk2_Data as DataClass
 import Mk3_Models as customModels
@@ -62,7 +63,7 @@ def main(config):
 
     #load data
     print('Building Data')
-    data = DataClass.Data(config['data_name'],config['batch_size'],split=[0.8,0.2,0])
+    data = DataClass.Data(config)
     data.build_data()
 
     print('Building Model')
@@ -74,7 +75,7 @@ def main(config):
     
     #train model
     epochs_per_step = 1
-    for i in range(25):
+    for i in range(config['epochs']):
         #TODO There is a memory leak most likely with dataset building each epoch
         #tf error in converting index slices to tensors
         print('Training Epoch: ',(i+1)*epochs_per_step)
@@ -88,25 +89,37 @@ def main(config):
 if __name__ == '__main__':
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
     wandb.login()
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('-m', type=int, default='8', help='size of the maximisation set')
+    parser.add_argument('-r', type=float, default='0.15', help='radius of the ball')
+    args = parser.parse_args()
 
-    config = {'group':'mSAMmsize',
+    print('m: ',args.m)
+    print('r: ',args.r)
+
+    config = {'group':'mrhotest',
                 'loss_func':'categorical_crossentropy',
-                'data_name':'mnist',
+                'data_name':'cifar10',
+                'data_split':[0.8,0.2,0],
                 'acc_sample_weight':None,
                 'optimizer':'mSAM_SGD',
+                'momentum':0.9,
                 'lr':0.01,
-                'lr_decay_type':'fixed',
-                'batch_size':32,
+                'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
+                'lr_decay_type':'fixed', #fixed, exp_decay, percentage_step_decay
+                'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'Dense1',
+                'model_name':'ResNet18',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
-                'img_size':(28,28,1),
-                'rho':0.05,
-                'rho_decay':1,
-                'm':32, # must be less than batch size
-                
+                'img_size':(32,32,3),
+                'rho':args.r, # radius of ball 
+                'rho_decay':1, # 1 = no decay
+                'm':args.m, # must be less than batch size
+                'augs': None,#{'flip':True},
+                'weight_reg':0.0005,
+                'epochs': 200,
                 }
     wandb.init(project="SAM",config=config)
     main(config)
