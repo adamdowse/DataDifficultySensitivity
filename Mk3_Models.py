@@ -1314,7 +1314,7 @@ def model_selector(model_name,config):
     return model, output_is_logits
 
 def optimizer_selector(optimizer_name,config,lr_schedule):
-    if optimizer_name == 'SGD'
+    if optimizer_name == 'SGD':
         return tf.keras.optimizers.SGD(learning_rate=lr_schedule)
     elif optimizer_name == 'SAM_SGD':
         return SAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
