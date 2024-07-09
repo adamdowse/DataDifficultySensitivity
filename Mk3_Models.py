@@ -422,29 +422,30 @@ class FSAM(tf.keras.optimizers.Optimizer):
 
 
 def metric_selector(config):
-    match config['loss_func']:
-        case 'categorical_crossentropy':
-            return tf.keras.metrics.CategoricalAccuracy()
+    if config['loss_func'] == 'categorical_crossentropy':
+        return tf.keras.metrics.CategoricalAccuracy()
 
 
 def loss_selector(loss_name, config, output_is_logits=False):
-    match loss_name:
-        case 'categorical_crossentropy':
-            return tf.keras.losses.CategoricalCrossentropy(from_logits=output_is_logits)
+    if loss_name == 'categorical_crossentropy':
+        return tf.keras.losses.CategoricalCrossentropy(from_logits=output_is_logits)
 
 def lr_selector(lr_name,config):
-    match lr_name:
-        case 'fixed':
-            return config['lr']
-        case 'exp_decay':
-            return tf.keras.optimizers.schedules.ExponentialDecay(config['lr'],decay_steps=config['lr_decay_type'][0],decay_rate=config['lr_decay_type'][1],staircase=True)
-        case 'percentage_step_decay':
-            lr_decay_rate = config['lr_decay_params']['lr_decay_rate']
-            lr_decay_epochs_percent = config['lr_decay_params']['lr_decay_epochs_percent']
-            return tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-                [int(lr_decay_epochs_percent[0]*config['epochs']),int(lr_decay_epochs_percent[1]*config['epochs'])],
-                [config['lr'],config['lr']*lr_decay_rate,config['lr']*lr_decay_rate**2]
-                )
+    
+    if lr_name == 'fixed':
+        return config['lr']
+    elif lr_name == 'exp_decay':
+        return tf.keras.optimizers.schedules.ExponentialDecay(config['lr'],decay_steps=config['lr_decay_type'][0],decay_rate=config['lr_decay_type'][1],staircase=True)
+    elif lr_name == 'percentage_step_decay':
+        lr_decay_rate = config['lr_decay_params']['lr_decay_rate']
+        lr_decay_epochs_percent = config['lr_decay_params']['lr_decay_epochs_percent']
+        return tf.keras.optimizers.schedules.PiecewiseConstantDecay(
+            [int(lr_decay_epochs_percent[0]*config['epochs']),int(lr_decay_epochs_percent[1]*config['epochs'])],
+            [config['lr'],config['lr']*lr_decay_rate,config['lr']*lr_decay_rate**2]
+            )
+    else:
+        print('Learning Rate Schedule not recognised')
+        return None
 
 
 def model_selector(model_name,config):
@@ -1313,14 +1314,15 @@ def model_selector(model_name,config):
     return model, output_is_logits
 
 def optimizer_selector(optimizer_name,config,lr_schedule):
-    match optimizer_name:
-        case 'SGD':
-            return tf.keras.optimizers.SGD(learning_rate=lr_schedule)
-        case 'SAM_SGD':
-            return SAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
-        case 'FSAM_SGD':
-            return FSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
-        case 'ASAM_SGD':
-            return ASAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
-        case 'mSAM_SGD':
-            return mSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
+    if optimizer_name == 'SGD'
+        return tf.keras.optimizers.SGD(learning_rate=lr_schedule)
+    elif optimizer_name == 'SAM_SGD':
+        return SAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+    elif optimizer_name == 'FSAM_SGD':
+        return FSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+    elif optimizer_name == 'ASAM_SGD':
+        return ASAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+    elif optimizer_name == 'mSAM_SGD':
+        return mSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
+    else:
+        print('Optimizer not recognised')

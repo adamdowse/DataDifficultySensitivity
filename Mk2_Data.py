@@ -492,20 +492,19 @@ class Data():
         
         #Pull from web source
         #Currently uses only default splits
-        match self.dataset_name:
-            case 'mnist':
-                self.train_data,self.test_data,self.val_data = self.get_MNIST()
-            case 'imdb_reviews':
-                self.train_data,self.test_data,self.val_data = self.get_imdb_reviews()
-            case 'newswire':
-                self.train_data,self.test_data,self.val_data = self.get_newswire()
-            case 'speech_commands':
+        if self.dataset_name == 'mnist':
+            self.train_data,self.test_data,self.val_data = self.get_MNIST()
+        elif self.dataset_name == 'imdb_reviews':
+            self.train_data,self.test_data,self.val_data = self.get_imdb_reviews()
+        elif self.dataset_name == 'newswire':
+            self.train_data,self.test_data,self.val_data = self.get_newswire()
+        elif self.dataset_name == 'speech_commands':
                 self.train_data,self.test_data,self.val_data = self.get_speech_commands()
-            case 'cifar10':
+        elif self.dataset_name == 'cifar10':
                 self.train_data,self.test_data,self.val_data = self.get_CIFAR10()
-            case _:
-                print('Dataset not recognised')
-                return None
+        else:
+            print('Dataset not recognised')
+            return None
         
     def build_iter_ds(self,shuffle=False,bs=None):
         #Shuffle and batch data
