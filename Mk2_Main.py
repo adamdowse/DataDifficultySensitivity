@@ -97,12 +97,12 @@ if __name__ == '__main__':
     print('m: ',args.m)
     print('r: ',args.r)
 
-    config = {'group':'mrhotest',
+    config = {'group':'test',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.8,0.2,0],
                 'acc_sample_weight':None,
-                'optimizer':'mSAM_SGD',
+                'optimizer':'lmSAM_SGD',
                 'momentum':0.9,
                 'lr':0.01,
                 'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
@@ -110,7 +110,7 @@ if __name__ == '__main__':
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'ResNet18',
+                'model_name':'CNN',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),

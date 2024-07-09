@@ -46,7 +46,7 @@ class Model(tf.keras.Model):
                 loss = self.compiled_loss(y, y_hat)
             gradients = tape.gradient(loss, self.model.trainable_variables)
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-        elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD']:
+        elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD','lmSAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
         
         else:
@@ -252,9 +252,10 @@ class lmSAM(tf.keras.optimizers.Optimizer):
         with tf.GradientTape() as tape:
             y_hat = model(x,training=True)
             loss = self.nored_loss(y,y_hat)
-        loss = tf.math.top_k(loss, self.m).values #only take the m largest losses
-        loss = tf.reduce_mean(loss)#mean the losses
-        gs = tape.gradient(loss, model.trainable_variables)
+            redloss = tf.math.top_k(loss, self.m).values #only take the m largest losses
+            redloss = tf.reduce_mean(redloss)#mean the reduced losses
+            gloss = tf.reduce_mean(loss)#mean of all losses
+        gs = tape.gradient(redloss, model.trainable_variables)
         grad_norm = tf.linalg.global_norm(gs)
         eps = [(g * self.rho)/ (grad_norm + 1e-12) for g in gs]
 
@@ -264,7 +265,7 @@ class lmSAM(tf.keras.optimizers.Optimizer):
         #print('Model Trainable Variables: ',[e.shape for e in model.trainable_variables])
 
         #model.trainable_variables = tf.map_fn(lambda var,eps: var + eps, (model.trainable_variables, self.eps))
-        return loss,y_hat,eps
+        return gloss,y_hat,eps
     
     @tf.function
     def min_step(self,model,x,y,loss_func,eps):
@@ -1324,5 +1325,7 @@ def optimizer_selector(optimizer_name,config,lr_schedule):
         return ASAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
     elif optimizer_name == 'mSAM_SGD':
         return mSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
+    elif optimizer_name == 'lmSAM_SGD':
+        return lmSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
     else:
         print('Optimizer not recognised')
