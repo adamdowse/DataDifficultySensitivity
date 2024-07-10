@@ -1135,6 +1135,7 @@ def model_selector(model_name,config):
         inputs = keras.Input(shape=config['img_size'])
         outputs = PreActResNet(PreActBlock,[2,2,2,2],config['num_classes'],model_width=64,activation='relu',droprate=0.0,bn_flag=True)(inputs)
         model = keras.Model(inputs, outputs)
+        output_is_logits = False
         
 
 
