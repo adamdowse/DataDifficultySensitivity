@@ -22,13 +22,26 @@ class Augmentation():
         aug = tf.keras.Sequential()
         for aug_name in self.config['augs'].keys():
             if aug_name == 'flip':
-                aug.add(tf.keras.layers.RandomFlip('horizontal'))
+                if self.config['augs'][aug_name] == "horizontal":
+                    aug.add(tf.keras.layers.RandomFlip('horizontal'))
+                elif self.config['augs'][aug_name] == "vertical":
+                    aug.add(tf.keras.layers.RandomFlip('vertical'))
+
             elif aug_name == 'rotate':
                 aug.add(tf.keras.layers.experimental.preprocessing.RandomRotation(0.2))
+
             elif aug_name == 'zoom':
                 aug.add(tf.keras.layers.experimental.preprocessing.RandomZoom(0.2))
+
             elif aug_name == 'crop':
-                aug.add(tf.keras.layers.RandomCrop(32,32)) #padding=4
+                params = self.config['augs'][aug_name]
+                if params != None:
+                    #to match torchvision transforms we need to add padding
+                    aug.add(tf.keras.layers.RandomCrop(self.config['img_size'][0]-params,self.config['img_size'][1]-params))
+                    aug.add(tf.keras.layers.Resizing(self.config['img_size'][0],self.config['img_size'][1]))
+                else:
+                    print('No crop variables provided, not cropping')
+
             elif aug_name == 'noise':
                 aug.add(tf.keras.layers.GaussianNoise(0.1))
             elif aug_name == 'labelCorr':

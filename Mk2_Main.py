@@ -117,7 +117,7 @@ if __name__ == '__main__':
                 'rho':args.r, # radius of ball 
                 'rho_decay':1, # 1 = no decay
                 'm':args.m, # must be less than batch size
-                'augs': None,#{'flip':True},
+                'augs': {'flip':'horizontal','crop':4},#{'flip':horizonatal,"crop":padding},
                 'weight_reg':0.0005,
                 'epochs': 200,
                 }
