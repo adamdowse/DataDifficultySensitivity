@@ -515,6 +515,129 @@ def model_selector(model_name,config):
             return x
         return resnet(x, vars,num_classes)
 
+    def build_preact_resnet(x,block_type,blocks_per_layer,n_cls,model_width=64,REG=0):
+        #modified to tf from https://github.com/tml-epfl/understanding-sam/blob/main/deep_nets/models.py#L231
+        kaiming_normal = keras.initializers.VarianceScaling(scale=2.0, mode='fan_out', distribution='untruncated_normal')
+
+        def preact_block(x,planes,stride,downsample=None,name=None):
+            #maybe need to do some more work on the "act_function" call with softplus?
+            out = tf.keras.layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.bn1')(x)
+            out = tf.keras.layers.ReLU(name=f'{name}.relu1')(out)
+            if stride != 1 or inplanes != planes:
+                shortcut = tf.keras.layers.Conv2D(filters=planes, kernel_size=1, strides=stride, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name=f'{name}.shortcut.0')(out)
+            else:
+                shortcut = x
+            out = tf.keras.layers.Conv2D(filters=planes, kernel_size=3, strides=stride, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name=f'{name}.conv1')(out)
+            out = tf.keras.layers.BatchNormalization(momentum=0.9, epsilon=1e-5, name=f'{name}.bn2')(out)
+            out = tf.keras.layers.ReLU(name=f'{name}.relu2')(out)
+            out = tf.keras.layers.Conv2D(filters=planes, kernel_size=3, strides=1, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name=f'{name}.conv2')(out)
+            out = tf.keras.layers.Add(name=f'{name}.add')([out, shortcut])
+            return out
+
+        def make_layer(x, block_type,planes,num_blocks,stride,name=None):
+            strides = [stride] + [1]*(num_blocks-1)
+            for stride in strides:
+                if block_type == 'basic_block':
+                    x = basic_block(x,planes,stride,downsample=None,name=name)
+                    inplanes = planes * basic_block.expansion
+                elif block_type == 'preact_block':
+                    x = preact_block(x,planes,stride,downsample=None,name=name)
+                    inplanes = planes * 1
+            return x
+
+        def resnet(x, block_type, blocks_per_layer, num_classes, model_width):
+            #maybe a norm layer here --->
+            x = tf.keras.layers.Conv2D(filters=model_width, kernel_size=3, strides=1, use_bias=False, kernel_initializer=kaiming_normal,kernel_regularizer=keras.regularizers.l2(REG), name='conv1')(x)
+
+            x = make_layer(x, block_type, model_width, blocks_per_layer[0], 1, name='layer1')
+            x = make_layer(x, block_type, 2*model_width, blocks_per_layer[1], 2, name='layer2')
+            x = make_layer(x, block_type, 4*model_width, blocks_per_layer[2], 2, name='layer3')
+            x = make_layer(x, block_type, 8*model_width, blocks_per_layer[3], 2, name='layer4')
+
+            x = tf.keras.layers.BatchNormalization(name='bn1')(x)
+            x = tf.keras.layers.ReLU(name='relu1')(x)
+            x = tf.keras.layers.AveragePooling2D(4,name='avgpool')(x)
+            x = tf.keras.layers.Flatten(name='flatten')(x)
+            return x
+        inplanes = model_width
+        return resnet(x, block_type, blocks_per_layer, n_cls, model_width)
+
+    class PreActBlock(tf.keras.layers.Layer):
+        expansion = 1
+        def __init__(self,in_planes,planes,bn,learnable_bn, stride=1, activation='relu',droprate=0.0):
+            super(PreActBlock,self).__init__()
+            self.collect_preact = True
+            self.activation = activation
+            self.droprate = droprate
+            self.bn1 = tf.keras.layers.BatchNormalization()
+            self.conv1 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=stride, padding='same', use_bias=not learnable_bn)
+            self.bn2 = tf.keras.layers.BatchNormalization()
+            #self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=not learnable_bn)
+            self.conv2 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=1, padding='same', use_bias=not learnable_bn)
+
+            if stride != 1 or in_planes != self.expansion*planes:
+                self.shortcut = tf.keras.layers.Conv2D(self.expansion*planes, kernel_size=1, strides=stride, use_bias=not learnable_bn)
+
+        def act_function(self,preact):
+            if self.activation == 'relu':
+                return tf.nn.relu(preact)
+            elif self.activation == 'softplus':
+                return tf.nn.softplus(preact)
+            else:
+                print('ERROR in Activation in Preact module')
+        
+        def call(self,x):
+            out = self.act_function(self.bn1(x))
+            shortcut = self.shortcut(out) if hasattr(self,'shortcut') else x
+            out = self.conv1(out)
+            out = self.act_function(self.bn2(out))
+            if self.droprate > 0:
+                out = tf.nn.dropout(out,self.droprate,training=self.training)
+            out = self.conv2(out)
+            out += shortcut
+            return out
+
+    class PreActResNet(tf.keras.layers.Layer):
+        def __init__(self,block,blocks_per_layer,num_classes,model_width=64,activation='relu',droprate=0.0,bn_flag=True):
+            super(PreActResNet,self).__init__()
+            self.bn_flag = bn_flag
+            self.learnable_bn = True  # doesn't matter if self.bn=False
+            self.in_planes = model_width
+            self.activation = activation
+            self.num_classes = num_classes
+
+            self.normalize = tf.keras.layers.Normalization() #need to call adapt on this before fitting
+            self.conv1 = tf.keras.layers.Conv2D(model_width, kernel_size=3, strides=1, padding='same', use_bias=not self.learnable_bn)
+            
+            self.layer1 = self._make_layer(block, model_width, blocks_per_layer[0], 1, droprate)
+            self.layer2 = self._make_layer(block, 2*model_width, blocks_per_layer[1], 2, droprate)
+            self.layer3 = self._make_layer(block, 4*model_width, blocks_per_layer[2], 2, droprate)
+            self.layer4 = self._make_layer(block, 8*model_width, blocks_per_layer[3], 2, droprate)
+            self.bn = tf.keras.layers.BatchNormalization()
+            self.linear = tf.keras.layers.Dense(num_classes,activation='softmax')
+
+        def _make_layer(self, block, planes, num_blocks, stride, droprate):
+            strides = [stride] + [1]*(num_blocks-1)
+            seq_model = tf.keras.Sequential()
+            for stride in strides:
+                seq_model.add(block(self.in_planes,planes,self.bn_flag,self.learnable_bn, stride=stride, activation=self.activation,droprate=0.0))
+                self.in_planes = planes * block.expansion
+            return seq_model
+
+        def call(self,x):
+            out = self.normalize(x)
+            out = self.conv1(out)
+            out = self.layer1(out)
+            out = self.layer2(out)
+            out = self.layer3(out)
+            out = self.layer4(out)
+            out = tf.keras.activations.relu(self.bn(out))
+            out = tf.keras.layers.AveragePooling2D(4)(out)
+            out = tf.keras.layers.Flatten()(out)
+            out = self.linear(out)
+            return out
+
+
     class SoftAttention(tf.keras.layers.Layer):
         def __init__(self,ch,m,concat_with_x=False,aggregate=False,**kwargs):
             self.channels=int(ch)
@@ -1003,10 +1126,18 @@ def model_selector(model_name,config):
     elif config['model_name'] == "ResNet18":
         #build resnet18 model
         inputs = keras.Input(shape=config['img_size'])
-        outputs = build_resnet(inputs,[2,2,2,2],config['num_classes'],config['weight_reg'])
-
+        #outputs = build_resnet(inputs,[2,2,2,2],config['num_classes'],model_width=64,REG=0)
         model = keras.Model(inputs, outputs)
         output_is_logits = False
+
+
+    elif config['model_name'] == "PA_ResNet18":
+        inputs = keras.Input(shape=config['img_size'])
+        outputs = PreActResNet(PreActBlock,[2,2,2,2],config['num_classes'],model_width=64,activation='relu',droprate=0.0,bn_flag=True)(inputs)
+        model = keras.Model(inputs, outputs)
+        
+
+
     # elif config['model_name'] == "ResNetV1-14":
     #     #https://www.kaggle.com/code/filippokevin/cifar-10-resnet-14/notebook
     #     inputs = keras.Input(shape=self.img_shape)

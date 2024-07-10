@@ -74,15 +74,15 @@ def main(config):
     #compute_metrics(data,model,epoch=0,FIM_bs=5,limit=metric_limit)
     
     #train model
-    epochs_per_step = 1
-    for i in range(config['epochs']):
-        #TODO There is a memory leak most likely with dataset building each epoch
-        #tf error in converting index slices to tensors
-        print('Training Epoch: ',(i+1)*epochs_per_step)
-        model.fit(data.train_data,batch_size=config['batch_size'],validation_data=data.test_data,epochs=epochs_per_step,callbacks=[wandb.keras.WandbCallback(save_model=False)])
-        #compute_metrics(data,model,epoch=(i+1)*epochs_per_step,FIM_bs=5,limit=metric_limit)
+    # epochs_per_step = 1
+    # for i in range(config['epochs']):
+    #     #TODO There is a memory leak most likely with dataset building each epoch
+    #     #tf error in converting index slices to tensors
+    #     print('Training Epoch: ',(i+1)*epochs_per_step)
+    #     model.fit(data.train_data,batch_size=config['batch_size'],shuffle=True,validation_data=data.test_data,epochs=epochs_per_step,callbacks=[wandb.keras.WandbCallback(save_model=False)])
+    #     #compute_metrics(data,model,epoch=(i+1)*epochs_per_step,FIM_bs=5,limit=metric_limit)
     
-
+    model.fit(data.train_data,batch_size=config['batch_size'],shuffle=True,validation_data=data.test_data,epochs=config['epochs'],callbacks=[wandb.keras.WandbCallback(save_model=False)])
 
 
 
@@ -102,7 +102,7 @@ if __name__ == '__main__':
                 'data_name':'cifar10',
                 'data_split':[0.8,0.2,0],
                 'acc_sample_weight':None,
-                'optimizer':'lmSAM_SGD',
+                'optimizer':'mSAM_SGD',
                 'momentum':0.9,
                 'lr':0.01,
                 'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
@@ -110,7 +110,7 @@ if __name__ == '__main__':
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'CNN',
+                'model_name':'PA_ResNet18',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
