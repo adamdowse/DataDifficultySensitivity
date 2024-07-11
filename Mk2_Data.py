@@ -429,7 +429,7 @@ class Data():
     def get_CIFAR10(self):
         #returns the CIFAR10 dataset in tf format as onehot and normalised
         (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
-        print(y_train[0].shape)
+        self.steps_per_epoch = len(x_train)//self.batch_size
 
         #Resize data if needed
         if self.train_count != None:
@@ -518,6 +518,8 @@ class Data():
         else:
             print('Dataset not recognised')
             return None
+        
+        
         
     def build_iter_ds(self,shuffle=False,bs=None):
         #Shuffle and batch data

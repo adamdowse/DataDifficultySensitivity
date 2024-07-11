@@ -125,10 +125,10 @@ def build_model(config):
     learning_schedule = lr_selector(config['lr_decay_type'],config)
     loss_func = loss_selector(config['loss_func'],config,output_is_logits)
     optimizer = optimizer_selector(config['optimizer'],config,lr_schedule=learning_schedule)
-    metrics = metric_selector(config)
+    metrics = metric_selector(config,optimizer)
 
     model = Model(selected_model,config)
-    model.compile(optimizer=optimizer, loss=loss_func, metrics=[metrics])
+    model.compile(optimizer=optimizer, loss=loss_func, metrics=metrics)
     return model
 
 class SAM(tf.keras.optimizers.Optimizer):
@@ -169,6 +169,7 @@ class SAM(tf.keras.optimizers.Optimizer):
         #model.trainable_variables = tf.map_fn(lambda var,eps: var - eps, (model.trainable_variables, self.eps))
         #apply normal gradient step
         self.base_optim.apply_gradients(zip(gs, model.trainable_variables))
+        #tf.print(self.base_optim.lr)
 
     def step(self, x, y, model, loss_func):
         #compute the max step
@@ -422,9 +423,22 @@ class FSAM(tf.keras.optimizers.Optimizer):
         return loss,y_hat
 
 
-def metric_selector(config):
+def metric_selector(config,optimizer):
+    metrics = []
     if config['loss_func'] == 'categorical_crossentropy':
-        return tf.keras.metrics.CategoricalAccuracy()
+        metrics.append(tf.keras.metrics.CategoricalAccuracy())
+    
+    def get_lr_metric(optimizer):
+        if hasattr(optimizer,'base_optim'):
+            lr = optimizer.base_optim.lr
+        else:
+            lr = optimizer.lr
+        return lr
+
+    lr_metric = get_lr_metric(optimizer)
+    metrics.append(lr_metric)
+
+    return metrics
 
 
 def loss_selector(loss_name, config, output_is_logits=False):
@@ -432,6 +446,29 @@ def loss_selector(loss_name, config, output_is_logits=False):
         return tf.keras.losses.CategoricalCrossentropy(from_logits=output_is_logits)
 
 def lr_selector(lr_name,config):
+    class EpochPercentDecaySchedule(keras.optimizers.schedules.LearningRateSchedule):
+        def __init__(self, initial_learning_rate,steps_per_epoch,decay_rate,decay_epochs_percent,config):
+            self.lr = initial_learning_rate
+            self.steps_per_epoch = steps_per_epoch
+            self.decay_rate = decay_rate
+            self.decay_epochs_percent = decay_epochs_percent
+            self.epoch_decay_points = [int(decay_epochs_percent[i]*config['epochs']) for i in range(len(decay_epochs_percent))]
+            self.epoch = 0
+            self.config  = config
+
+        def __call__(self, step):
+            #update epoch
+            self.epoch = step // self.steps_per_epoch
+            cond = tf.reduce_any(tf.equal(self.epoch,self.epoch_decay_points))
+            def true_fn():
+                self.lr = self.lr * self.decay_rate
+                #remove the decay point
+                self.epoch_decay_points.pop(0)
+                tf.print('Learning Rate: ',self.lr)
+                return self.lr
+            def false_fn():
+                return self.lr
+            return tf.cond(cond,true_fn,false_fn)
     
     if lr_name == 'fixed':
         return config['lr']
@@ -440,10 +477,12 @@ def lr_selector(lr_name,config):
     elif lr_name == 'percentage_step_decay':
         lr_decay_rate = config['lr_decay_params']['lr_decay_rate']
         lr_decay_epochs_percent = config['lr_decay_params']['lr_decay_epochs_percent']
-        return tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-            [int(lr_decay_epochs_percent[0]*config['epochs']),int(lr_decay_epochs_percent[1]*config['epochs'])],
-            [config['lr'],config['lr']*lr_decay_rate,config['lr']*lr_decay_rate**2]
-            )
+        return EpochPercentDecaySchedule(config['lr'],
+            config['steps_per_epoch'],
+            lr_decay_rate,
+            lr_decay_epochs_percent,
+            config)
+            
     else:
         print('Learning Rate Schedule not recognised')
         return None
@@ -606,7 +645,7 @@ def model_selector(model_name,config):
             self.activation = activation
             self.num_classes = num_classes
 
-            self.normalize = tf.keras.layers.Normalization() #need to call adapt on this before fitting
+            self.normalize = tf.keras.layers.Normalization(mean=0.0, variance=1.0) 
             self.conv1 = tf.keras.layers.Conv2D(model_width, kernel_size=3, strides=1, padding='same', use_bias=not self.learnable_bn)
             
             self.layer1 = self._make_layer(block, model_width, blocks_per_layer[0], 1, droprate)
@@ -1448,16 +1487,21 @@ def model_selector(model_name,config):
 
 def optimizer_selector(optimizer_name,config,lr_schedule):
     if optimizer_name == 'SGD':
-        return tf.keras.optimizers.SGD(learning_rate=lr_schedule)
+        optim= tf.keras.optimizers.SGD(learning_rate=lr_schedule)
     elif optimizer_name == 'SAM_SGD':
-        return SAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+        optim= SAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
     elif optimizer_name == 'FSAM_SGD':
-        return FSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+        optim= FSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
     elif optimizer_name == 'ASAM_SGD':
-        return ASAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+        optim= ASAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
     elif optimizer_name == 'mSAM_SGD':
-        return mSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
+        optim= mSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
     elif optimizer_name == 'lmSAM_SGD':
-        return lmSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
+        optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
     else:
         print('Optimizer not recognised')
+        return None
+    
+    return optim
+    
+    

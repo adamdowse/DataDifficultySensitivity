@@ -65,6 +65,7 @@ def main(config):
     print('Building Data')
     data = DataClass.Data(config)
     data.build_data()
+    config.update({'steps_per_epoch':data.steps_per_epoch})
 
     print('Building Model')
     model = customModels.build_model(config)
@@ -81,8 +82,13 @@ def main(config):
     #     print('Training Epoch: ',(i+1)*epochs_per_step)
     #     model.fit(data.train_data,batch_size=config['batch_size'],shuffle=True,validation_data=data.test_data,epochs=epochs_per_step,callbacks=[wandb.keras.WandbCallback(save_model=False)])
     #     #compute_metrics(data,model,epoch=(i+1)*epochs_per_step,FIM_bs=5,limit=metric_limit)
-    
-    model.fit(data.train_data,batch_size=config['batch_size'],shuffle=True,validation_data=data.test_data,epochs=config['epochs'],callbacks=[wandb.keras.WandbCallback(save_model=False)])
+    #lr_callback = tf.keras.callbacks.LearningRateScheduler(customModels.lr_selector(config['lr_decay_type'],config), verbose=1)
+    model.fit(data.train_data,
+        batch_size=config['batch_size'],
+        shuffle=True,
+        validation_data=data.test_data,
+        epochs=config['epochs'],
+        callbacks=[wandb.keras.WandbCallback(save_model=False)])
 
 
 
@@ -97,16 +103,16 @@ if __name__ == '__main__':
     print('m: ',args.m)
     print('r: ',args.r)
 
-    config = {'group':'test',
+    config = {'group':'pa_resnet_test',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.8,0.2,0],
                 'acc_sample_weight':None,
                 'optimizer':'mSAM_SGD',
                 'momentum':0.9,
-                'lr':0.01,
+                'lr':0.1,
                 'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
-                'lr_decay_type':'fixed', #fixed, exp_decay, percentage_step_decay
+                'lr_decay_type':'percentage_step_decay', #fixed, exp_decay, percentage_step_decay
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
