@@ -732,16 +732,16 @@ def model_selector(model_name,config):
 
             #init layers
             self.conv1 = tf.keras.layers.Conv2D(self.n_stages[0], kernel_size=3, strides=1, padding='same', use_bias=True, kernel_regularizer=keras.regularizers.l2(REG))
-            self.layer1 = self._make_layer(block, self.n_stages[1], self.n, 1, droprate,REG)
-            self.layer2 = self._make_layer(block, self.n_stages[2], self.n, 2, droprate,REG)
-            self.layer3 = self._make_layer(block, self.n_stages[3], self.n, 2, droprate,REG)
+            self.layer1 = self._make_layer(block, self.n_stages[0], self.n_stages[1], self.n, 1, droprate,REG)
+            self.layer2 = self._make_layer(block, self.n_stages[1], self.n_stages[2], self.n, 2, droprate,REG)
+            self.layer3 = self._make_layer(block, self.n_stages[2], self.n_stages[3], self.n, 2, droprate,REG)
             self.bn = tf.keras.layers.BatchNormalization(scale=True,center=True)
             self.act = tf.keras.layers.Activation('relu')
             self.avgpool = tf.keras.layers.AveragePooling2D(8)
-            self.reshape = tf.keras.layers.Reshape((-1,640))
+            self.reshape = tf.keras.layers.Flatten()
             self.dense = tf.keras.layers.Dense(num_classes,activation='softmax')
 
-        def _make_layer(self, in_planes, out_planes, num_blocks, stride, droprate,REG=0.0):
+        def _make_layer(self,block, in_planes, out_planes, num_blocks, stride, droprate,REG=0.0):
             strides = [stride] + [1]*(num_blocks-1)
             seq_model = tf.keras.Sequential()
             for stride in strides:

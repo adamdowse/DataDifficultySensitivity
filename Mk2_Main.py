@@ -119,7 +119,7 @@ if __name__ == '__main__':
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'CNN',
+                'model_name':'WRN28-10',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
