@@ -68,8 +68,11 @@ def main(config):
     config.update({'steps_per_epoch':data.steps_per_epoch})
 
     print('Building Model')
-    model = customModels.build_model(config)
-    model.model.summary()
+    model,callbacks = customModels.build_model(config)
+    #model.model.summary()
+    wandbcallback = wandb.keras.WandbCallback(save_model=False)
+    callbacks.append(wandbcallback)
+    print('Callbacks:',callbacks)
     
     metric_limit = 1000
     #compute_metrics(data,model,epoch=0,FIM_bs=5,limit=metric_limit)
@@ -88,7 +91,7 @@ def main(config):
         shuffle=True,
         validation_data=data.test_data,
         epochs=config['epochs'],
-        callbacks=[wandb.keras.WandbCallback(save_model=False)])
+        callbacks=callbacks)
 
 
 
@@ -103,20 +106,20 @@ if __name__ == '__main__':
     print('m: ',args.m)
     print('r: ',args.r)
 
-    config = {'group':'pa_resnet_test',
+    config = {'group':'test',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.8,0.2,0],
                 'acc_sample_weight':None,
-                'optimizer':'mSAM_SGD',
+                'optimizer':'SAM_SGD',
                 'momentum':0.9,
                 'lr':0.1,
-                'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
+                'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.25,0.5,0.75]},
                 'lr_decay_type':'percentage_step_decay', #fixed, exp_decay, percentage_step_decay
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'PA_ResNet18',
+                'model_name':'CNN',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
@@ -125,7 +128,7 @@ if __name__ == '__main__':
                 'm':args.m, # must be less than batch size
                 'augs': {'flip':'horizontal','crop':4},#{'flip':horizonatal,"crop":padding},
                 'weight_reg':0.0005,
-                'epochs': 200,
+                'epochs': 10,
                 }
     wandb.init(project="SAM",config=config)
     main(config)

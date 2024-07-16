@@ -24,6 +24,7 @@ class Model(tf.keras.Model):
         self.load_metrics(self.config)
         self.max_train_accuracy = 0
         self.max_test_accuracy = 0
+        self.lr = None
 
     def load_metrics(self,config):
         self.metrics_list = []
@@ -122,14 +123,14 @@ class Model(tf.keras.Model):
 
 def build_model(config):
     selected_model,output_is_logits = model_selector(config['model_name'],config)
-    learning_schedule = lr_selector(config['lr_decay_type'],config)
     loss_func = loss_selector(config['loss_func'],config,output_is_logits)
-    optimizer = optimizer_selector(config['optimizer'],config,lr_schedule=learning_schedule)
-    metrics = metric_selector(config,optimizer)
+    optimizer = optimizer_selector(config['optimizer'],config)
+    metrics = metric_selector(config)
+    callbacks = callback_selector(config)
 
     model = Model(selected_model,config)
     model.compile(optimizer=optimizer, loss=loss_func, metrics=metrics)
-    return model
+    return model, callbacks
 
 class SAM(tf.keras.optimizers.Optimizer):
     def __init__(self, base_optim, config, name="SAM", **kwargs):
@@ -422,21 +423,78 @@ class FSAM(tf.keras.optimizers.Optimizer):
 
         return loss,y_hat
 
+class LRMetric(tf.keras.metrics.Metric):
+    def __init__(self, optimizer, name='LR', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.lr = self.add_variable(
+            shape=(),
+            initializer='zeros',
+            name='lr'
+        )
+        if hasattr(optimizer, 'base_optim'):
+            self.optimizer = optimizer.base_optim
+        else:
+            self.optimizer = optimizer
 
-def metric_selector(config,optimizer):
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        self.lr.assign(self.optimizer.lr)
+
+    def result(self):
+        return self.lr
+
+
+def fixed_lrschedule(epoch,lr,config):
+    return lr
+
+def percentage_step_decay_lrschedule(epoch,lr,config):
+    change_epochs = [int(config['epochs']*i) for i in config['lr_decay_params']['lr_decay_epochs_percent']]
+    tf.print('Change Epochs: ',change_epochs)
+    tf.print('Epoch: ',epoch)
+    if int(epoch) in change_epochs:
+        lr = lr * config['lr_decay_params']['lr_decay_rate']
+    return lr
+
+def callback_selector(config):
+    class CustomLRScheduler(tf.keras.callbacks.Callback):
+        #sets the LR for the model
+        def __init__(self,lr_schedule,config):
+            super().__init__()
+            self.lr_schedule = lr_schedule
+            self.config = config
+        def on_epoch_begin(self, epoch, logs=None):
+            #check if the optimzer has a base_optim attribute
+            if hasattr(self.model.optimizer, 'base_optim'):
+                lr = float(tf.keras.backend.get_value(self.model.optimizer.base_optim.lr))
+                new_lr = self.lr_schedule(epoch,lr,self.config)
+                tf.keras.backend.set_value(self.model.optimizer.base_optim.lr, new_lr)
+
+            else:
+                lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
+                new_lr = self.lr_schedule(epoch,lr,self.config)
+                tf.keras.backend.set_value(self.model.optimizer.lr, new_lr)
+            wandb.log({'lr':new_lr},commit=False)
+            tf.print('Learning Rate: ',new_lr)
+    
+    #this defiens any callback for the fit function
+    callbacks = []
+    #learning rate changes
+    if config['lr_decay_type'] == 'fixed':
+        lr_callback = CustomLRScheduler(fixed_lrschedule,config)
+        callbacks.append(lr_callback)
+    elif config['lr_decay_type'] == 'percentage_step_decay':
+        lr_callback = CustomLRScheduler(percentage_step_decay_lrschedule,config)
+        callbacks.append(lr_callback)
+    print('Callbacks: ',callbacks)
+    
+    return callbacks
+    
+    
+        
+
+def metric_selector(config):
     metrics = []
     if config['loss_func'] == 'categorical_crossentropy':
         metrics.append(tf.keras.metrics.CategoricalAccuracy())
-    
-    def get_lr_metric(optimizer):
-        if hasattr(optimizer,'base_optim'):
-            lr = optimizer.base_optim.lr
-        else:
-            lr = optimizer.lr
-        return lr
-
-    lr_metric = get_lr_metric(optimizer)
-    metrics.append(lr_metric)
 
     return metrics
 
@@ -445,47 +503,7 @@ def loss_selector(loss_name, config, output_is_logits=False):
     if loss_name == 'categorical_crossentropy':
         return tf.keras.losses.CategoricalCrossentropy(from_logits=output_is_logits)
 
-def lr_selector(lr_name,config):
-    class EpochPercentDecaySchedule(keras.optimizers.schedules.LearningRateSchedule):
-        def __init__(self, initial_learning_rate,steps_per_epoch,decay_rate,decay_epochs_percent,config):
-            self.lr = initial_learning_rate
-            self.steps_per_epoch = steps_per_epoch
-            self.decay_rate = decay_rate
-            self.decay_epochs_percent = decay_epochs_percent
-            self.epoch_decay_points = [int(decay_epochs_percent[i]*config['epochs']) for i in range(len(decay_epochs_percent))]
-            self.epoch = 0
-            self.config  = config
 
-        def __call__(self, step):
-            #update epoch
-            self.epoch = step // self.steps_per_epoch
-            cond = tf.reduce_any(tf.equal(self.epoch,self.epoch_decay_points))
-            def true_fn():
-                self.lr = self.lr * self.decay_rate
-                #remove the decay point
-                self.epoch_decay_points.pop(0)
-                tf.print('Learning Rate: ',self.lr)
-                return self.lr
-            def false_fn():
-                return self.lr
-            return tf.cond(cond,true_fn,false_fn)
-    
-    if lr_name == 'fixed':
-        return config['lr']
-    elif lr_name == 'exp_decay':
-        return tf.keras.optimizers.schedules.ExponentialDecay(config['lr'],decay_steps=config['lr_decay_type'][0],decay_rate=config['lr_decay_type'][1],staircase=True)
-    elif lr_name == 'percentage_step_decay':
-        lr_decay_rate = config['lr_decay_params']['lr_decay_rate']
-        lr_decay_epochs_percent = config['lr_decay_params']['lr_decay_epochs_percent']
-        return EpochPercentDecaySchedule(config['lr'],
-            config['steps_per_epoch'],
-            lr_decay_rate,
-            lr_decay_epochs_percent,
-            config)
-            
-    else:
-        print('Learning Rate Schedule not recognised')
-        return None
 
 
 def model_selector(model_name,config):
@@ -1485,19 +1503,19 @@ def model_selector(model_name,config):
     #     self.model.build(input_shape=self.new_img_size + (1,))
     return model, output_is_logits
 
-def optimizer_selector(optimizer_name,config,lr_schedule):
+def optimizer_selector(optimizer_name,config):
     if optimizer_name == 'SGD':
-        optim= tf.keras.optimizers.SGD(learning_rate=lr_schedule)
+        optim= tf.keras.optimizers.SGD(learning_rate=config['lr'])
     elif optimizer_name == 'SAM_SGD':
-        optim= SAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+        optim= SAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
     elif optimizer_name == 'FSAM_SGD':
-        optim= FSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+        optim= FSAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
     elif optimizer_name == 'ASAM_SGD':
-        optim= ASAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule),config)
+        optim= ASAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
     elif optimizer_name == 'mSAM_SGD':
-        optim= mSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
+        optim= mSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'lmSAM_SGD':
-        optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=lr_schedule,momentum=config['momentum']),config)
+        optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     else:
         print('Optimizer not recognised')
         return None
