@@ -621,19 +621,19 @@ def model_selector(model_name,config):
 
     class PreActBlock(tf.keras.layers.Layer):
         expansion = 1
-        def __init__(self,in_planes,planes,bn,learnable_bn, stride=1, activation='relu',droprate=0.0):
+        def __init__(self,in_planes,planes,bn,learnable_bn, stride=1, activation='relu',droprate=0.0,REG=0.0):
             super(PreActBlock,self).__init__()
             self.collect_preact = True
             self.activation = activation
             self.droprate = droprate
             self.bn1 = tf.keras.layers.BatchNormalization()
-            self.conv1 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=stride, padding='same', use_bias=not learnable_bn)
+            self.conv1 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=stride, padding='same', use_bias=not learnable_bn, kernel_regularizer=keras.regularizers.l2(REG))
             self.bn2 = tf.keras.layers.BatchNormalization()
             #self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=not learnable_bn)
-            self.conv2 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=1, padding='same', use_bias=not learnable_bn)
+            self.conv2 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=1, padding='same', use_bias=not learnable_bn, kernel_regularizer=keras.regularizers.l2(REG))
 
             if stride != 1 or in_planes != self.expansion*planes:
-                self.shortcut = tf.keras.layers.Conv2D(self.expansion*planes, kernel_size=1, strides=stride, use_bias=not learnable_bn)
+                self.shortcut = tf.keras.layers.Conv2D(self.expansion*planes, kernel_size=1, strides=stride, use_bias=not learnable_bn, kernel_regularizer=keras.regularizers.l2(REG))
 
         def act_function(self,preact):
             if self.activation == 'relu':
@@ -655,7 +655,7 @@ def model_selector(model_name,config):
             return out
 
     class PreActResNet(tf.keras.layers.Layer):
-        def __init__(self,block,blocks_per_layer,num_classes,model_width=64,activation='relu',droprate=0.0,bn_flag=True):
+        def __init__(self,block,blocks_per_layer,num_classes,model_width=64,activation='relu',droprate=0.0,bn_flag=True,REG=0.0):
             super(PreActResNet,self).__init__()
             self.bn_flag = bn_flag
             self.learnable_bn = True  # doesn't matter if self.bn=False
@@ -664,20 +664,20 @@ def model_selector(model_name,config):
             self.num_classes = num_classes
 
             self.normalize = tf.keras.layers.Normalization(mean=0.0, variance=1.0) 
-            self.conv1 = tf.keras.layers.Conv2D(model_width, kernel_size=3, strides=1, padding='same', use_bias=not self.learnable_bn)
+            self.conv1 = tf.keras.layers.Conv2D(model_width, kernel_size=3, strides=1, padding='same', use_bias=not self.learnable_bn, kernel_regularizer=keras.regularizers.l2(REG))
             
-            self.layer1 = self._make_layer(block, model_width, blocks_per_layer[0], 1, droprate)
-            self.layer2 = self._make_layer(block, 2*model_width, blocks_per_layer[1], 2, droprate)
-            self.layer3 = self._make_layer(block, 4*model_width, blocks_per_layer[2], 2, droprate)
-            self.layer4 = self._make_layer(block, 8*model_width, blocks_per_layer[3], 2, droprate)
+            self.layer1 = self._make_layer(block, model_width, blocks_per_layer[0], 1, droprate,REG)
+            self.layer2 = self._make_layer(block, 2*model_width, blocks_per_layer[1], 2, droprate,REG)
+            self.layer3 = self._make_layer(block, 4*model_width, blocks_per_layer[2], 2, droprate,REG)
+            self.layer4 = self._make_layer(block, 8*model_width, blocks_per_layer[3], 2, droprate,REG)
             self.bn = tf.keras.layers.BatchNormalization()
             self.linear = tf.keras.layers.Dense(num_classes,activation='softmax')
 
-        def _make_layer(self, block, planes, num_blocks, stride, droprate):
+        def _make_layer(self, block, planes, num_blocks, stride, droprate,REG=0.0):
             strides = [stride] + [1]*(num_blocks-1)
             seq_model = tf.keras.Sequential()
             for stride in strides:
-                seq_model.add(block(self.in_planes,planes,self.bn_flag,self.learnable_bn, stride=stride, activation=self.activation,droprate=0.0))
+                seq_model.add(block(self.in_planes,planes,self.bn_flag,self.learnable_bn, stride=stride, activation=self.activation,droprate=0.0,REG=REG))
                 self.in_planes = planes * block.expansion
             return seq_model
 
@@ -693,6 +693,74 @@ def model_selector(model_name,config):
             out = tf.keras.layers.Flatten()(out)
             out = self.linear(out)
             return out
+
+    class WideBasic(tf.keras.layers.Layer):
+        def __init__(self,in_planes,planes,stride,droprate,REG=0.0):
+            super(WideBasic,self).__init__()
+            self.bn1 = tf.keras.layers.BatchNormalization(scale=True,center=True)
+            self.act1 = tf.keras.layers.Activation('relu')
+            self.conv1 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=1, padding='same', use_bias=True, kernel_regularizer=keras.regularizers.l2(REG))
+            self.do1 = tf.keras.layers.Dropout(droprate)
+            self.bn2 = tf.keras.layers.BatchNormalization(scale=True,center=True)
+            self.act2 = tf.keras.layers.Activation('relu')
+            self.conv2 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=stride, padding='same', use_bias=True, kernel_regularizer=keras.regularizers.l2(REG))
+
+            if stride != 1 or in_planes != planes:
+                self.shortcut = tf.keras.layers.Conv2D(planes, kernel_size=1, strides=stride, use_bias=True, kernel_regularizer=keras.regularizers.l2(REG))
+            else:
+                self.shortcut = tf.keras.layers.Lambda(lambda x: x)
+
+        def call(self,x):
+            out = self.bn1(x)
+            skip = self.shortcut(x)
+
+            out = self.act1(out)
+            out = self.conv1(out)
+            out = self.do1(out)
+            out = self.bn2(out)
+            out = self.act2(out)
+            out = self.conv2(out)
+            out += skip
+            return out
+
+    class WideResNet(tf.keras.layers.Layer):
+        def __init__(self,block,num_classes,depth=28,widen_factor=10,activation='relu',droprate=0.0,REG=0.0):
+            super(WideResNet,self).__init__()
+            self.n = (depth-4)//6
+            self.k = widen_factor
+            self.n_stages = [16, 16*self.k, 32*self.k, 64*self.k]
+
+            #init layers
+            self.conv1 = tf.keras.layers.Conv2D(self.n_stages[0], kernel_size=3, strides=1, padding='same', use_bias=True, kernel_regularizer=keras.regularizers.l2(REG))
+            self.layer1 = self._make_layer(block, self.n_stages[1], self.n, 1, droprate,REG)
+            self.layer2 = self._make_layer(block, self.n_stages[2], self.n, 2, droprate,REG)
+            self.layer3 = self._make_layer(block, self.n_stages[3], self.n, 2, droprate,REG)
+            self.bn = tf.keras.layers.BatchNormalization(scale=True,center=True)
+            self.act = tf.keras.layers.Activation('relu')
+            self.avgpool = tf.keras.layers.AveragePooling2D(8)
+            self.reshape = tf.keras.layers.Reshape((-1,640))
+            self.dense = tf.keras.layers.Dense(num_classes,activation='softmax')
+
+        def _make_layer(self, in_planes, out_planes, num_blocks, stride, droprate,REG=0.0):
+            strides = [stride] + [1]*(num_blocks-1)
+            seq_model = tf.keras.Sequential()
+            for stride in strides:
+                seq_model.add(block(in_planes,out_planes,stride,droprate,REG))
+                in_planes = out_planes
+            return seq_model
+        
+        def call(self,x):
+            out = self.conv1(x)
+            out = self.layer1(out)
+            out = self.layer2(out)
+            out = self.layer3(out)
+            out = self.bn(out)
+            out = self.act(out)
+            out = self.avgpool(out)
+            out = self.reshape(out)
+            out = self.dense(out)
+            return out
+
 
 
     class SoftAttention(tf.keras.layers.Layer):
@@ -1190,10 +1258,16 @@ def model_selector(model_name,config):
 
     elif config['model_name'] == "PA_ResNet18":
         inputs = keras.Input(shape=config['img_size'])
-        outputs = PreActResNet(PreActBlock,[2,2,2,2],config['num_classes'],model_width=64,activation='relu',droprate=0.0,bn_flag=True)(inputs)
+        outputs = PreActResNet(PreActBlock,[2,2,2,2],config['num_classes'],model_width=64,activation='relu',droprate=0.0,bn_flag=True,REG=config['weight_reg'])(inputs)
         model = keras.Model(inputs, outputs)
         output_is_logits = False
-        
+
+    elif config['model_name'] == "WRN28-10":
+        inputs = keras.Input(shape=config['img_size'])
+        #block,num_classes,depth=28,widen_factor=10,activation='relu',droprate=0.0,REG=0.0
+        outputs = WideResNet(WideBasic,config['num_classes'],depth=28,widen_factor=10,activation='relu',droprate=0.0,REG=config['weight_reg'])(inputs)
+        model = keras.Model(inputs, outputs)
+        output_is_logits = False
 
 
     # elif config['model_name'] == "ResNetV1-14":
@@ -1505,17 +1579,17 @@ def model_selector(model_name,config):
 
 def optimizer_selector(optimizer_name,config):
     if optimizer_name == 'SGD':
-        optim= tf.keras.optimizers.SGD(learning_rate=config['lr'])
+        optim= tf.keras.optimizers.SGD(learning_rate=config['lr'],weight_decay=config['weight_reg'])
     elif optimizer_name == 'SAM_SGD':
-        optim= SAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
+        optim= SAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],weight_decay=config['weight_reg']),config)
     elif optimizer_name == 'FSAM_SGD':
-        optim= FSAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
+        optim= FSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],weight_decay=config['weight_reg']),config)
     elif optimizer_name == 'ASAM_SGD':
-        optim= ASAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
+        optim= ASAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],weight_decay=config['weight_reg']),config)
     elif optimizer_name == 'mSAM_SGD':
-        optim= mSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+        optim= mSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum'],weight_decay=config['weight_reg']),config)
     elif optimizer_name == 'lmSAM_SGD':
-        optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+        optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum'],weight_decay=config['weight_reg']),config)
     else:
         print('Optimizer not recognised')
         return None

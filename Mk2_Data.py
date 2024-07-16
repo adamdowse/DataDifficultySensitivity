@@ -499,6 +499,13 @@ class Data():
 
         return train_data, test_data, val_data
 
+    def get_flowers(self):
+        #get flowers dataset from tfds
+        (train_data, test_data),data_info = tfds.load('tf_flowers', split=['train[:80%]', 'train[80%:]'], as_supervised=True, with_info=True)
+        #cast to float and normalise
+
+
+
     def build_data(self):
         #build the dataset from source and hold all in memory 
         #Mainly used to pull small test datasets like mnist and cifar10
