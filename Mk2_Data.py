@@ -190,6 +190,12 @@ class Data():
             self.input_shape = None
             self.total_data_points = 8000
             return True
+        elif dataset_name == 'flowers':
+            self.x_type = 'img'
+            self.num_classes = 5
+            self.input_shape = (180,180,3)
+            self.total_data_points = 3670
+            return True
 
         else:
             print('Dataset not recognised')
@@ -460,10 +466,10 @@ class Data():
                 print('Val count is larger than dataset size so original size is used')
 
         #map x to float32 and normalise
-        x_train = tf.cast(x_train,tf.float32)/255
-        x_test = tf.cast(x_test,tf.float32)/255
+        x_train = tf.cast(x_train,tf.float32)
+        x_test = tf.cast(x_test,tf.float32)
         if self.split[2] != 0:
-            x_val = tf.cast(x_val,tf.float32)/255
+            x_val = tf.cast(x_val,tf.float32)
 
         #map y to one hot
         y_train = tf.one_hot(y_train,10)
@@ -502,7 +508,36 @@ class Data():
     def get_flowers(self):
         #get flowers dataset from tfds
         (train_data, test_data),data_info = tfds.load('tf_flowers', split=['train[:80%]', 'train[80%:]'], as_supervised=True, with_info=True)
+        self.num_classes = data_info.features['label'].num_classes
+        self.train_count = data_info.splits['train[:80%]'].num_examples
+        self.test_count = data_info.splits['train[80%:]'].num_examples
+        self.steps_per_epoch = self.train_count//self.batch_size
         #cast to float and normalise
+        train_data = train_data.map(lambda x,y: (tf.cast(x,tf.float32),y))
+        test_data = test_data.map(lambda x,y: (tf.cast(x,tf.float32),y))
+        #one hot encode the labels
+        train_data = train_data.map(lambda x,y: (x,tf.one_hot(y,self.num_classes)))
+        test_data = test_data.map(lambda x,y: (x,tf.one_hot(y,self.num_classes)))
+        #augs
+        def resize(x):
+            #min dimention
+            #get the image height and width
+            height = tf.shape(x)[0]
+            width = tf.shape(x)[1]
+            #find the smallest dimention
+            min_dim = tf.minimum(height,width)
+            #crop the image to the smallest dimention
+            x = tf.image.random_crop(x,[min_dim,min_dim,3])
+            #resize the image to 180
+            return tf.image.resize(x,[180,180])
+        train_data = train_data.map(lambda x,y: (resize(x), y) , num_parallel_calls=tf.data.AUTOTUNE)
+        test_data = test_data.map(lambda x,y: (resize(x), y) , num_parallel_calls=tf.data.AUTOTUNE)
+        train_data = train_data.map(lambda x,y:(self.augmentation.aug(x), y) , num_parallel_calls=tf.data.AUTOTUNE)
+        #shuffle and batch data
+        train_data = train_data.shuffle(self.train_count).batch(self.batch_size)
+        test_data = test_data.batch(self.batch_size)
+        self.current_train_batch_size = self.batch_size
+        return train_data, test_data, None
 
 
 
@@ -522,6 +557,8 @@ class Data():
                 self.train_data,self.test_data,self.val_data = self.get_speech_commands()
         elif self.dataset_name == 'cifar10':
                 self.train_data,self.test_data,self.val_data = self.get_CIFAR10()
+        elif self.dataset_name == 'flowers':
+                self.train_data,self.test_data,self.val_data = self.get_flowers()
         else:
             print('Dataset not recognised')
             return None

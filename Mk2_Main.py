@@ -59,7 +59,12 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 def main(config):
     #build model
     
-    strategy = None
+    #strategy = None
+    strategy = tf.distribute.MirroredStrategy()
+    if strategy is not None:
+        print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
+        config['batch_size'] = config['batch_size']*strategy.num_replicas_in_sync
+        print('Batch size per replica: ',config['batch_size'])
 
     #load data
     print('Building Data')
@@ -68,7 +73,11 @@ def main(config):
     config.update({'steps_per_epoch':data.steps_per_epoch})
 
     print('Building Model')
-    model,callbacks = customModels.build_model(config)
+    if strategy is not None:
+        with strategy.scope():
+            model,callbacks = customModels.build_model(config)
+    else:
+        model,callbacks = customModels.build_model(config)
     #model.model.summary()
     wandbcallback = wandb.keras.WandbCallback(save_model=False)
     callbacks.append(wandbcallback)

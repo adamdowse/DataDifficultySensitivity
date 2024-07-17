@@ -197,8 +197,6 @@ class mSAM(tf.keras.optimizers.Optimizer):
         #reduce the batch size to m
         with tf.GradientTape() as tape:
             y_hat = model(x,training=True)
-            print('Y_HAT: ',y_hat)
-            print('Y: ',y)
             loss = self.nored_loss(y,y_hat)
             index = tf.random.uniform([self.m],0,tf.shape(x)[0],dtype=tf.int32)
             loss = tf.gather(loss,index)
@@ -563,8 +561,6 @@ def model_selector(model_name,config):
             x = make_layer(x, 256, blocks_per_layer[2], stride=2, name='layer3')
             x = make_layer(x, 512, blocks_per_layer[3], stride=2, name='layer4')
 
-            
-
             x = tf.keras.layers.GlobalAveragePooling2D(name='avgpool')(x)
             initializer = tf.keras.initializers.RandomUniform(-1.0 / math.sqrt(512), 1.0 / math.sqrt(512))
             x = tf.keras.layers.Dense(units=num_classes, kernel_initializer=initializer, bias_initializer=initializer, name='fc')(x)
@@ -619,6 +615,63 @@ def model_selector(model_name,config):
         inplanes = model_width
         return resnet(x, block_type, blocks_per_layer, n_cls, model_width)
 
+    def resnetV2(x,vars,init_feature_maps,block_type,num_classes,shortcut_type='identity',REG=0):
+        #https://github.com/christianversloot/machine-learning-articles/blob/main/how-to-build-a-resnet-from-scratch-with-tensorflow-2-and-keras.md
+        #block type = string of either 'basic_block' or 'preact_block'
+        #init_feature_maps = 64 (does not currently implement the "width" parameter or resnet50 and above)
+        #vars for resnet18 = [2,2,2,2]
+        #so: {[3x3,64],[3x3,64]}+{[3x3,128],[3x3,128]}+{[3x3,256],[3x3,256]}+{[3x3,512],[3x3,512]}
+        initializer = tf.keras.initializers.HeNormal()
+        def BasicBlock(x,filters,match_filter_size=False):
+            x_skip = x
+            if match_filter_size:
+                x = tf.keras.layers.Conv2D(filters,kernel_size=3,strides=2,padding='same',kernel_initializer=initializer)(x_skip)
+            else:
+                x = tf.keras.layers.Conv2D(filters,kernel_size=3,strides=1,padding='same',kernel_initializer=initializer)(x_skip)
+
+            x = tf.keras.layers.BatchNormalization(axis=3)(x)
+            x = tf.keras.layers.ReLU()(x)
+            x = tf.keras.layers.Conv2D(filters,kernel_size=3,strides=1,padding='same',kernel_initializer=initializer)(x)    
+            x = tf.keras.layers.BatchNormalization(axis=3)(x)
+
+            if match_filter_size and shortcut_type == 'identity':
+                x_skip = tf.keras.layers.Lambda(lambda x: tf.pad(x[:,::2,::2,:],tf.constant([[0,0],[0,0],[0,0],[filters//4,filters//4]]),mode='CONSTANT'))(x_skip)
+            else:
+                x_skip = tf.keras.layers.Conv2D(filters,kernel_size=1,strides=2,padding='same',kernel_initializer=initializer)(x_skip)
+
+            x = tf.keras.layers.Add()([x,x_skip])
+            x = tf.keras.layers.ReLU()(x)
+            return x
+
+
+        def ResBlocks(x):
+            filter_size = init_feature_maps
+            for layer_group in range(len(vars)):
+                for block in range(layer_group):
+                    if layer_group > 0 and block == 0:
+                        filter_size = filter_size * 2
+                        if block_type == 'basic_block':
+                            x = BasicBlock(x,filter_size,match_filter_size=True)
+                        elif block_type == 'preact_block':
+                            x = PreActBlock(x,filter_size,match_filter_size=True)
+                    else:
+                        if block_type == 'basic_block':
+                            x = BasicBlock(x,filter_size)
+                        elif block_type == 'preact_block':
+                            x = PreActBlock(x,filter_size)
+            return x
+
+
+        def resnet(x)
+            x = tf.keras.applications.resnet.preprocess_input(x)
+            x = tf.keras.layers.Conv2D(init_feature_maps,kernel_size=3,strides=1,padding='same',kernel_initializer=initializer)(x)
+            x = tf.keras.layers.BatchNormalization()(x)
+            x = tf.keras.layers.ReLU()(x)
+            x = ResBlocks(x)
+            x = tf.keras.layers.GlobalAveragePooling2D()(x)
+            x = tf.keras.layers.Flatten()(x)
+            output = tf.keras.layers.Dense(num_classes,activation='softmax',kernel_initializer=initializer)(x)
+        return output
     class PreActBlock(tf.keras.layers.Layer):
         expansion = 1
         def __init__(self,in_planes,planes,bn,learnable_bn, stride=1, activation='relu',droprate=0.0,REG=0.0):
@@ -1251,7 +1304,13 @@ def model_selector(model_name,config):
     elif config['model_name'] == "ResNet18":
         #build resnet18 model
         inputs = keras.Input(shape=config['img_size'])
-        #outputs = build_resnet(inputs,[2,2,2,2],config['num_classes'],model_width=64,REG=0)
+        outputs = build_resnet(inputs,[2,2,2,2],config['num_classes'],REG=0)
+        model = keras.Model(inputs, outputs)
+        output_is_logits = False
+
+    elif config['model_name'] == "ResNet18V2":
+        inputs = keras.Input(shape=config['img_size'])
+        outputs = resnetV2(inputs,[2,2,2,2],64,'basic_block',config['num_classes'],shortcut_type='identity',REG=0)
         model = keras.Model(inputs, outputs)
         output_is_logits = False
 
@@ -1579,17 +1638,17 @@ def model_selector(model_name,config):
 
 def optimizer_selector(optimizer_name,config):
     if optimizer_name == 'SGD':
-        optim= tf.keras.optimizers.SGD(learning_rate=config['lr'],weight_decay=config['weight_reg'])
+        optim= tf.keras.optimizers.SGD(learning_rate=config['lr'])
     elif optimizer_name == 'SAM_SGD':
-        optim= SAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],weight_decay=config['weight_reg']),config)
+        optim= SAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
     elif optimizer_name == 'FSAM_SGD':
-        optim= FSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],weight_decay=config['weight_reg']),config)
+        optim= FSAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
     elif optimizer_name == 'ASAM_SGD':
-        optim= ASAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],weight_decay=config['weight_reg']),config)
+        optim= ASAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
     elif optimizer_name == 'mSAM_SGD':
-        optim= mSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum'],weight_decay=config['weight_reg']),config)
+        optim= mSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'lmSAM_SGD':
-        optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum'],weight_decay=config['weight_reg']),config)
+        optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     else:
         print('Optimizer not recognised')
         return None
