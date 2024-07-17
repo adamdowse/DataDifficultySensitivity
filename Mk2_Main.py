@@ -110,25 +110,27 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process some integers.')
     parser.add_argument('-m', type=int, default='8', help='size of the maximisation set')
     parser.add_argument('-r', type=float, default='0.15', help='radius of the ball')
+    parser.add_argument('-o', type=str, default='SGD', help='optimizer type')
     args = parser.parse_args()
 
     print('m: ',args.m)
     print('r: ',args.r)
+    print('o: ',args.o)
 
     config = {'group':'test',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.8,0.2,0],
                 'acc_sample_weight':None,
-                'optimizer':'SAM_SGD',
+                'optimizer':args.o,
                 'momentum':0.9,
                 'lr':0.1,
-                'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.25,0.5,0.75]},
+                'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
                 'lr_decay_type':'percentage_step_decay', #fixed, exp_decay, percentage_step_decay
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'WRN28-10',
+                'model_name':'ResNet18V2',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
@@ -136,8 +138,8 @@ if __name__ == '__main__':
                 'rho_decay':1, # 1 = no decay
                 'm':args.m, # must be less than batch size
                 'augs': {'flip':'horizontal','crop':4},#{'flip':horizonatal,"crop":padding},
-                'weight_reg':0.0005,
-                'epochs': 10,
+                'weight_reg':0.0,
+                'epochs': 200,
                 }
     wandb.init(project="SAM",config=config)
     main(config)
