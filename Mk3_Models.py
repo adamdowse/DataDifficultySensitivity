@@ -615,137 +615,72 @@ def model_selector(model_name,config):
         inplanes = model_width
         return resnet(x, block_type, blocks_per_layer, n_cls, model_width)
 
-    def resnetV2(x,vars,init_feature_maps,block_type,num_classes,shortcut_type='identity',REG=0):
+    def resnetV2(x,stackwise_features,stackwise_blocks,stackwise_strides,block_type,num_classes,REG=0):
         #https://github.com/christianversloot/machine-learning-articles/blob/main/how-to-build-a-resnet-from-scratch-with-tensorflow-2-and-keras.md
-        #block type = string of either 'basic_block' or 'preact_block'
-        #init_feature_maps = 64 (does not currently implement the "width" parameter or resnet50 and above)
-        #vars for resnet18 = [2,2,2,2]
+        #x = input tensor
+        #stackwise_features =[64,128,256,512]
+        #stackwise_blocks =[2,2,2,2]
+        #stackwise_strides=[1,2,2,2]
         #so: {[3x3,64],[3x3,64]}+{[3x3,128],[3x3,128]}+{[3x3,256],[3x3,256]}+{[3x3,512],[3x3,512]}
+        #block type = string of either 'basic_block' or 'block'
+        #shortcut type = string of either 'identity' or 'projection'
         initializer = tf.keras.initializers.HeNormal()
-        def BasicBlock(x,filters,match_filter_size=False):
-            x_skip = x
-            if match_filter_size:
-                x = tf.keras.layers.Conv2D(filters,kernel_size=3,strides=2,padding='same',kernel_initializer=initializer)(x_skip)
-            else:
-                x = tf.keras.layers.Conv2D(filters,kernel_size=3,strides=1,padding='same',kernel_initializer=initializer)(x_skip)
+        if block_type == 'basic_block':
+            block_fn = BasicBlock
+        elif block_type == 'block':
+            block_fn = PreActBlock
+        else:
+            raise ValueError('Block type not recognised')
+        def BasicBlock(x,filters,kernel_size=3,stride=1,conv_shortcut=False):
+            preact = tf.keras.layers.BatchNormalization(axis=3)(x)
+            preact = tf.keras.layers.ReLU()(preact)
 
+            if conv_shortcut:
+                shortcut = tf.keras.layers.Conv2D(filters,kernel_size=1,strides=stride,kernel_initializer=initializer)(preact)
+            else:
+                shortcut = tf.keras.layers.MaxPooling2D(1,strides=stride)(x) if stride > 1 else x
+
+            x = tf.keras.layers.Conv2D(filters,kernel_size,strides=1,padding='same',kernel_initializer=initializer,use_bias=False)(preact)
             x = tf.keras.layers.BatchNormalization(axis=3)(x)
             x = tf.keras.layers.ReLU()(x)
-            x = tf.keras.layers.Conv2D(filters,kernel_size=3,strides=1,padding='same',kernel_initializer=initializer)(x)    
-            x = tf.keras.layers.BatchNormalization(axis=3)(x)
 
-            if match_filter_size and shortcut_type == 'identity':
-                x_skip = tf.keras.layers.Lambda(lambda x: tf.pad(x[:,::2,::2,:],tf.constant([[0,0],[0,0],[0,0],[filters//4,filters//4]]),mode='CONSTANT'))(x_skip)
-            else:
-                x_skip = tf.keras.layers.Conv2D(filters,kernel_size=1,strides=2,padding='same',kernel_initializer=initializer)(x_skip)
-
-            x = tf.keras.layers.Add()([x,x_skip])
-            x = tf.keras.layers.ReLU()(x)
+            x = tf.keras.layers.Conv2D(filters,kernel_size,strides=stride,padding='same',kernel_initializer=initializer,use_bias=False)(x)
+            x = tf.keras.layers.Add()([shortcut,x])
             return x
 
+        def Stack(x,filters,blocks,stride,dilations,block_type,first_shortcut):
+            #this is collection of blocks
+            x = block_fn(x,filters,match_filter_size=first_shortcut)
+            for block in range(2,blocks):
+                x = block_fn(x,filters)
+            x = block_fn(x,filters,stride=stride)
+            return x
 
         def ResBlocks(x):
+            stackwise_dialations = [1]*len(stackwise_features)
             filter_size = init_feature_maps
-            for layer_group in range(len(vars)):
-                for block in range(layer_group):
+            for layer_group in range(len(stackwise_features)):
+                for block in range(n):
                     if layer_group > 0 and block == 0:
                         filter_size = filter_size * 2
-                        if block_type == 'basic_block':
-                            x = BasicBlock(x,filter_size,match_filter_size=True)
-                        elif block_type == 'preact_block':
-                            x = PreActBlock(x,filter_size,match_filter_size=True)
+                        x = BasicBlock(x,filter_size,match_filter_size=True)
                     else:
-                        if block_type == 'basic_block':
-                            x = BasicBlock(x,filter_size)
-                        elif block_type == 'preact_block':
-                            x = PreActBlock(x,filter_size)
+                        x = BasicBlock(x,filter_size)
             return x
 
 
-        def resnet(x)
-            x = tf.keras.applications.resnet.preprocess_input(x)
-            x = tf.keras.layers.Conv2D(init_feature_maps,kernel_size=3,strides=1,padding='same',kernel_initializer=initializer)(x)
-            x = tf.keras.layers.BatchNormalization()(x)
-            x = tf.keras.layers.ReLU()(x)
+        def resnet(x):
+            x = tf.keras.layers.Conv2D(64,kernel_size=7,strides=2,padding='same',kernel_initializer=initializer)(x)
+            x = tf.keras.layers.MaxPooling2D(pool_size=3,strides=2,padding='same')(x)
             x = ResBlocks(x)
             x = tf.keras.layers.GlobalAveragePooling2D()(x)
             x = tf.keras.layers.Flatten()(x)
             output = tf.keras.layers.Dense(num_classes,activation='softmax',kernel_initializer=initializer)(x)
-        return output
-    class PreActBlock(tf.keras.layers.Layer):
-        expansion = 1
-        def __init__(self,in_planes,planes,bn,learnable_bn, stride=1, activation='relu',droprate=0.0,REG=0.0):
-            super(PreActBlock,self).__init__()
-            self.collect_preact = True
-            self.activation = activation
-            self.droprate = droprate
-            self.bn1 = tf.keras.layers.BatchNormalization()
-            self.conv1 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=stride, padding='same', use_bias=not learnable_bn, kernel_regularizer=keras.regularizers.l2(REG))
-            self.bn2 = tf.keras.layers.BatchNormalization()
-            #self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=not learnable_bn)
-            self.conv2 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=1, padding='same', use_bias=not learnable_bn, kernel_regularizer=keras.regularizers.l2(REG))
+            return output
+        return resnet(x)
 
-            if stride != 1 or in_planes != self.expansion*planes:
-                self.shortcut = tf.keras.layers.Conv2D(self.expansion*planes, kernel_size=1, strides=stride, use_bias=not learnable_bn, kernel_regularizer=keras.regularizers.l2(REG))
+    
 
-        def act_function(self,preact):
-            if self.activation == 'relu':
-                return tf.nn.relu(preact)
-            elif self.activation == 'softplus':
-                return tf.nn.softplus(preact)
-            else:
-                print('ERROR in Activation in Preact module')
-        
-        def call(self,x):
-            out = self.act_function(self.bn1(x))
-            shortcut = self.shortcut(out) if hasattr(self,'shortcut') else x
-            out = self.conv1(out)
-            out = self.act_function(self.bn2(out))
-            if self.droprate > 0:
-                out = tf.nn.dropout(out,self.droprate,training=self.training)
-            out = self.conv2(out)
-            out += shortcut
-            return out
-
-    class PreActResNet(tf.keras.layers.Layer):
-        def __init__(self,block,blocks_per_layer,num_classes,model_width=64,activation='relu',droprate=0.0,bn_flag=True,REG=0.0):
-            super(PreActResNet,self).__init__()
-            self.bn_flag = bn_flag
-            self.learnable_bn = True  # doesn't matter if self.bn=False
-            self.in_planes = model_width
-            self.activation = activation
-            self.num_classes = num_classes
-
-            self.normalize = tf.keras.layers.Normalization(mean=0.0, variance=1.0) 
-            self.conv1 = tf.keras.layers.Conv2D(model_width, kernel_size=3, strides=1, padding='same', use_bias=not self.learnable_bn, kernel_regularizer=keras.regularizers.l2(REG))
-            
-            self.layer1 = self._make_layer(block, model_width, blocks_per_layer[0], 1, droprate,REG)
-            self.layer2 = self._make_layer(block, 2*model_width, blocks_per_layer[1], 2, droprate,REG)
-            self.layer3 = self._make_layer(block, 4*model_width, blocks_per_layer[2], 2, droprate,REG)
-            self.layer4 = self._make_layer(block, 8*model_width, blocks_per_layer[3], 2, droprate,REG)
-            self.bn = tf.keras.layers.BatchNormalization()
-            self.linear = tf.keras.layers.Dense(num_classes,activation='softmax')
-
-        def _make_layer(self, block, planes, num_blocks, stride, droprate,REG=0.0):
-            strides = [stride] + [1]*(num_blocks-1)
-            seq_model = tf.keras.Sequential()
-            for stride in strides:
-                seq_model.add(block(self.in_planes,planes,self.bn_flag,self.learnable_bn, stride=stride, activation=self.activation,droprate=0.0,REG=REG))
-                self.in_planes = planes * block.expansion
-            return seq_model
-
-        def call(self,x):
-            out = self.normalize(x)
-            out = self.conv1(out)
-            out = self.layer1(out)
-            out = self.layer2(out)
-            out = self.layer3(out)
-            out = self.layer4(out)
-            out = tf.keras.activations.relu(self.bn(out))
-            out = tf.keras.layers.AveragePooling2D(4)(out)
-            out = tf.keras.layers.Flatten()(out)
-            out = self.linear(out)
-            return out
 
     class WideBasic(tf.keras.layers.Layer):
         def __init__(self,in_planes,planes,stride,droprate,REG=0.0):
@@ -814,6 +749,64 @@ def model_selector(model_name,config):
             out = self.dense(out)
             return out
 
+    class PreActBlock(tensorflow.keras.layers.Layer):
+        expansion = 1
+        def __init__(self,in_planes,planes, stride=1,dropout_rate=0.0):
+            super(PreActBlock,self).__init__()
+
+            self.bn1 = tensorflow.keras.layers.BatchNormalization()
+            self.conv1 = tensorflow.keras.layers.Conv2D(planes, kernel_size=3, strides=stride, padding='same', use_bias=False,kernel_initializer='he_normal')
+            self.bn2 = tensorflow.keras.layers.BatchNormalization()
+            #self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=not learnable_bn)
+            self.conv2 = tensorflow.keras.layers.Conv2D(planes, kernel_size=3, strides=1, padding='same', use_bias=False,kernel_initializer='he_normal')        
+            self.dropout = tensorflow.keras.layers.Dropout(dropout_rate)
+            if stride != 1 or in_planes != self.expansion*planes:
+                self.shortcut = tensorflow.keras.Sequential(tensorflow.keras.layers.Conv2D(self.expansion*planes, kernel_size=1, strides=stride, use_bias=False,kernel_initializer='he_normal'))        
+            print('blockinit')
+
+        def call(self,x,training=False):
+            out = tensorflow.nn.relu(self.bn1(x))
+            out = self.dropout(out,training=training)
+            shortcut = self.shortcut(out) if hasattr(self,'shortcut') else x
+            out = self.conv1(out)
+            out = tensorflow.nn.relu(self.bn2(out))
+            out = self.dropout(out,training=training)
+            out = self.conv2(out)
+            out += shortcut
+            return out
+
+    class PreActResNet(tensorflow.keras.Model):
+        def __init__(self,block,blocks_per_layer,num_classes,dropout_rate=0.0):
+            super(PreActResNet,self).__init__()
+            self.in_planes = 64
+
+            self.conv1 = tensorflow.keras.layers.Conv2D(64,kernel_size=3, strides=1, padding='same', use_bias=False,kernel_initializer='he_normal')        
+            self.layer1 = self._make_layer(block, 64, blocks_per_layer[0], stride=1)
+            self.layer2 = self._make_layer(block, 128, blocks_per_layer[1], stride=2)
+            self.layer3 = self._make_layer(block, 256, blocks_per_layer[2], stride=2)                                           
+            self.layer4 = self._make_layer(block, 512, blocks_per_layer[3], stride=2)
+            self.linear = tensorflow.keras.layers.Dense(num_classes,activation='softmax',kernel_initializer='he_normal')
+            self.AP = tensorflow.keras.layers.AveragePooling2D(4)                                                               
+            self.flat = tensorflow.keras.layers.Flatten()
+            print('Main init sucesess')
+        def _make_layer(self, block, planes, num_blocks, stride):                                                               
+            strides = [stride] + [1]*(num_blocks-1)
+            layer = tensorflow.keras.Sequential()
+            for stride in strides:
+                layer.add(block(self.in_planes,planes, stride=stride,dropout_rate=dropout_rate))
+                self.in_planes = planes * block.expansion
+            return layer
+
+        def call(self,x):
+            out = self.conv1(x)
+            out = self.layer1(out)
+            out = self.layer2(out)
+            out = self.layer3(out)
+            out = self.layer4(out)
+            out = self.AP(out)
+            out = self.flat(out)
+            out = self.linear(out)
+            return out
 
 
     class SoftAttention(tf.keras.layers.Layer):
@@ -1310,15 +1303,16 @@ def model_selector(model_name,config):
 
     elif config['model_name'] == "ResNet18V2":
         inputs = keras.Input(shape=config['img_size'])
-        outputs = resnetV2(inputs,[2,2,2,2],64,'basic_block',config['num_classes'],shortcut_type='identity',REG=0)
+        outputs = resnetV2(inputs,[64,128,256,512],[2,2,2,2],[1,2,2,2],'basic_block',config['num_classes'],REG=0)
         model = keras.Model(inputs, outputs)
         output_is_logits = False
 
 
     elif config['model_name'] == "PA_ResNet18":
+        #this is a [64,128,256,512] resnet18 with preactivations
         inputs = keras.Input(shape=config['img_size'])
-        outputs = PreActResNet(PreActBlock,[2,2,2,2],config['num_classes'],model_width=64,activation='relu',droprate=0.0,bn_flag=True,REG=config['weight_reg'])(inputs)
-        model = keras.Model(inputs, outputs)
+        model = PreActResNet(PreActBlock,[2,2,2,2],config['num_classes'],droprate=config['dropout'])(inputs)
+        model.build(input_shape=None + config['img_size'])
         output_is_logits = False
 
     elif config['model_name'] == "WRN28-10":

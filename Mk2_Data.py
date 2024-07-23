@@ -10,6 +10,7 @@ class Augmentation():
         self.pre_aug = pre_aug    #if true, augment in file location before loading
         self.config = config
         self.aug = self.data_augment()    #augmentation strategy for the data
+        self.normalise = self.data_normalise()    #normalisation strategy for the data
         # NEED TO SORT AUGMENTS Proberbly remove mem augment and just sequential model for this
 
     def dir_augment(self):
@@ -27,29 +28,33 @@ class Augmentation():
                 elif self.config['augs'][aug_name] == "vertical":
                     aug.add(tf.keras.layers.RandomFlip('vertical'))
 
-            elif aug_name == 'rotate':
-                aug.add(tf.keras.layers.experimental.preprocessing.RandomRotation(0.2))
-
-            elif aug_name == 'zoom':
-                aug.add(tf.keras.layers.experimental.preprocessing.RandomZoom(0.2))
-
             elif aug_name == 'crop':
-                params = self.config['augs'][aug_name]
+                params = self.config['augs'][aug_name] #pad size
                 if params != None:
                     #to match torchvision transforms we need to add padding
-                    aug.add(tf.keras.layers.RandomCrop(self.config['img_size'][0]-params,self.config['img_size'][1]-params))
-                    aug.add(tf.keras.layers.Resizing(self.config['img_size'][0],self.config['img_size'][1]))
+                    aug.add(tf.keras.layers.Lambda(lambda x: tf.pad(x, [[params, params], [params, params], [0, 0]], mode='CONSTANT')))
+                    aug.add(tf.keras.layers.RandomCrop(self.config['img_size'][0],self.config['img_size'][1]))
                 else:
                     print('No crop variables provided, not cropping')
-
-            elif aug_name == 'noise':
-                aug.add(tf.keras.layers.GaussianNoise(0.1))
-            elif aug_name == 'labelCorr':
-                aug.add(tf.keras.layers.experimental.preprocessing.RandomTranslation(0.1,0.1))
-            elif aug_name == 'resize':
-                aug.add(tf.keras.layers.experimental.preprocessing.Resizing(32,32))
+            elif aug_name == 'normalise':
+                print('Normalise done after augmentation')
             else:
                 print('Augmentation not recognised, skipping...')
+        return aug
+
+    def data_normalise(self):
+        #normalisation
+        aug = tf.keras.Sequential()
+        if 'normalise' in self.config['augs'].keys():
+            if self.config['augs']['normalise'] == 'div255':
+                aug.add(tf.keras.layers.experimental.preprocessing.Rescaling(1./255))
+            elif self.config['augs']['normalise'] == 'resnet50':
+                aug.add(tf.keras.layers.Lambda(lambda x: tf.keras.applications.resnet50.preprocess_input(x)))
+                aug.add(tf.keras.layers.experimental.preprocessing.Rescaling(1./255))
+            else:
+                print('Normalisation not recognised, skipping...')
+        else:
+            print('No normalisation provided, skipping...')
         return aug
     
     def mem_augment(self,ds,num_classes):
@@ -253,7 +258,7 @@ class Data():
             val_data = None
 
         #shuffle and batch data
-        train_data = train_data.shuffle(self.train_count).batch(self.batch_size)
+        train_data = train_data.shuffle(self.train_count,reshuffle_each_iteration=True).batch(self.batch_size)
         test_data = test_data.batch(self.batch_size)
         if self.split[2] != 0:
             val_data = val_data.batch(self.batch_size)
@@ -287,7 +292,7 @@ class Data():
         test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 
         #shuffle and batch data
-        train_ds = train_ds.shuffle(self.train_count).batch(self.batch_size)
+        train_ds = train_ds.shuffle(self.train_count,reshuffle_each_iteration=True).batch(self.batch_size)
         test_ds = test_ds.batch(self.batch_size)
         self.current_train_batch_size = self.batch_size
 
@@ -360,7 +365,7 @@ class Data():
         test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 
         #shuffle and batch data
-        train_ds = train_ds.shuffle(self.train_count).batch(self.batch_size)
+        train_ds = train_ds.shuffle(self.train_count,reshuffle_each_iteration=True).batch(self.batch_size)
         test_ds = test_ds.batch(self.batch_size)
         self.current_train_batch_size = self.batch_size
 
@@ -411,7 +416,7 @@ class Data():
         train_ds = make_spec_ds(train_ds)
         test_ds = make_spec_ds(test_ds)
 
-        train_ds = train_ds.cache().shuffle(10000).prefetch(tf.data.AUTOTUNE)
+        train_ds = train_ds.cache().shuffle(10000,reshuffle_each_iteration=True).prefetch(tf.data.AUTOTUNE)
         test_ds = test_ds.cache().prefetch(tf.data.AUTOTUNE)
 
         #deal with adapted layers in networks
@@ -458,49 +463,34 @@ class Data():
             self.test_count = len(x_test)
             print('Test count not specified, using full dataset')
         
-        if self.val_count != None and self.split[2] != 0:
-            if len(x_val) > self.val_count:
-                x_val = x_val[:self.val_count]
-                y_val = y_val[:self.val_count]
-            else:
-                print('Val count is larger than dataset size so original size is used')
 
         #map x to float32 and normalise
         x_train = tf.cast(x_train,tf.float32)
         x_test = tf.cast(x_test,tf.float32)
-        if self.split[2] != 0:
-            x_val = tf.cast(x_val,tf.float32)
 
         #map y to one hot
-        y_train = tf.one_hot(y_train,10)
-        y_test = tf.one_hot(y_test,10)
-        if self.split[2] != 0:
-            y_val = tf.one_hot(y_val,self.num_classes)
-        
-        #need to remove the extra dimension
-        y_train = tf.squeeze(y_train,axis=1)
-        y_test = tf.squeeze(y_test,axis=1)
-        if self.split[2] != 0:
-            y_val = tf.squeeze(y_val,axis=1)
+        y_train = tf.keras.utils.to_categorical(y_train,10)
+        y_train = tf.cast(y_train,tf.int32)
+        y_test = tf.keras.utils.to_categorical(y_test,10)
+        y_test = tf.cast(y_test,tf.int32)
 
         #Convert to tf dataset
         train_data = tf.data.Dataset.from_tensor_slices((x_train, y_train))
         test_data = tf.data.Dataset.from_tensor_slices((x_test, y_test))
-        if self.split[2] != 0:
-            val_data = tf.data.Dataset.from_tensor_slices((x_val, y_val))
-        else:
-            val_data = None
         
-        #augment the data
+        # shuffle, augment and batch data
+        #train
+        train_data = train_data.shuffle(self.train_count,reshuffle_each_iteration=True)
         if self.config['augs'] != None:
             print('Augmenting data')
+            self.augmentation = Augmentation(self.config)
             train_data = train_data.map(lambda x,y:(self.augmentation.aug(x), y) , num_parallel_calls=tf.data.AUTOTUNE)
-
-        #shuffle and batch data
-        train_data = train_data.shuffle(self.train_count).batch(self.batch_size)
+            train_data = train_data.map(lambda x,y:(self.augmentation.normalise(x), y) , num_parallel_calls=tf.data.AUTOTUNE)
+        train_data = train_data.batch(self.batch_size)
+        #test
+        test_data = test_data.map(lambda x,y:(self.augmentation.normalise(x), y) , num_parallel_calls=tf.data.AUTOTUNE)
         test_data = test_data.batch(self.batch_size)
-        if self.split[2] != 0:
-            val_data = val_data.batch(self.batch_size)
+
         self.current_train_batch_size = self.batch_size
 
         return train_data, test_data, val_data
@@ -534,7 +524,7 @@ class Data():
         test_data = test_data.map(lambda x,y: (resize(x), y) , num_parallel_calls=tf.data.AUTOTUNE)
         train_data = train_data.map(lambda x,y:(self.augmentation.aug(x), y) , num_parallel_calls=tf.data.AUTOTUNE)
         #shuffle and batch data
-        train_data = train_data.shuffle(self.train_count).batch(self.batch_size)
+        train_data = train_data.shuffle(self.train_count,reshuffle_each_iteration=True).batch(self.batch_size)
         test_data = test_data.batch(self.batch_size)
         self.current_train_batch_size = self.batch_size
         return train_data, test_data, None

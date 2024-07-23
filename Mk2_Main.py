@@ -59,8 +59,8 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 def main(config):
     #build model
     
-    #strategy = None
-    strategy = tf.distribute.MirroredStrategy()
+    strategy = None
+    #strategy = tf.distribute.MirroredStrategy()
     if strategy is not None:
         print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
         config['batch_size'] = config['batch_size']*strategy.num_replicas_in_sync
@@ -120,24 +120,25 @@ if __name__ == '__main__':
     config = {'group':'test',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
-                'data_split':[0.8,0.2,0],
+                'data_split':[0.9,0.1,0],
                 'acc_sample_weight':None,
                 'optimizer':args.o,
                 'momentum':0.9,
+                'dropout':0.0,
                 'lr':0.1,
                 'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
                 'lr_decay_type':'percentage_step_decay', #fixed, exp_decay, percentage_step_decay
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'ResNet18V2',
+                'model_name':'PA_ResNet18',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
                 'rho':args.r, # radius of ball 
                 'rho_decay':1, # 1 = no decay
                 'm':args.m, # must be less than batch size
-                'augs': {'flip':'horizontal','crop':4},#{'flip':horizonatal,"crop":padding},
+                'augs': {'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
                 'weight_reg':0.0,
                 'epochs': 200,
                 }
