@@ -5,25 +5,41 @@
 import time
 import tensorflow as tf
 import numpy as np
+import wandb
+import csv
 
+datetime = time.strftime("%Y%m%d-%H%M%S")
 
-
-def calc_train_loss_spectrum(dataset,model,limit=None):
+def calc_train_loss_spectrum(dataset,model,loss_func,limit=None,sort=True,save=False):
     #Return the loss spectrum of all of the provided data.
     #dataset class
     #model class
     print('Calculating Loss Spectrum')
     t = time.time()
-    dataset.build_train_iter() # build the iterator
     if limit != None:
         count = limit
     else:
         count = dataset.train_count
 
-    loss_spectrum = np.zeros((count,1))
-    for i in range(count//dataset.current_train_batch_size):
-        imgs,labels = dataset.get_batch()
-        loss_spectrum[i*dataset.current_train_batch_size:(i+1)*dataset.current_train_batch_size-1] = model.get_batch_loss(imgs,labels)
+    for step, (imgs, labels) in enumerate(dataset):
+        if step % 100 == 0:
+            print(step)
+        with tf.GradientTape() as tape:
+            losses = loss_func(labels, model(imgs))
+        if step == 0:
+            loss_spectrum = losses.numpy()
+        else:
+            loss_spectrum = np.append(loss_spectrum,losses.numpy())
+       
+    if sort:
+        #sort lowest to highest
+        loss_spectrum = np.sort(loss_spectrum)
+    if save:
+        with open("LossSpectrums/"+wandb.run.id+".csv","a+") as f:
+            writer = csv.writer(f)
+            #write loss spectrum to file
+            writer.writerow(loss_spectrum)
+
     print('--> time: ',time.time()-t)
     return loss_spectrum
 
@@ -164,34 +180,69 @@ def calc_dist_FIM(ds,model,FIM_bs,limit=None):
     print('--> time: ',time.time()-t)
     return mean
 
-def calc_FIM(ds,model,FIM_bs,limit=None,model_output_type='binary_logit'):
+def calc_FIM(ds,model,FIM_bs,bs,loss_func,limit=None,model_output_type='logit',groups=None,return_losses=False):
+    #model_output_type: 'logit' or 'softmax'
     print('Calculating FIM (Non-Distributed)')
     t = time.time()
+    #calcualte the losses
+    if groups == None:
+        groups = 1
+    if return_losses:
+        losses = calc_train_loss_spectrum(ds,model,loss_func,limit=limit,sort=True,save=True)
+    else:
+        losses = calc_train_loss_spectrum(ds,model,loss_func,limit=limit,sort=True,save=False)
+    upper_bounds = np.zeros(groups)
+    for i in range(groups):
+        upper_bounds[i] = losses[int((i+1)*len(losses)/groups)-1]
+    
     if limit == None:
         limit = ds.train_count
         print("FIM limit not specified, using ",ds.train_count," data points")
-    
-    data_count = 0
-    s = 0
-    ds.build_iter_ds(shuffle=False,bs=FIM_bs)
-    for _ in range(limit//FIM_bs):
-        if data_count/FIM_bs % 100 == 0:
-            print(data_count)
-        if model_output_type == 'binary_logit':
-            z = model.Get_Z_logit(ds.get_batch())#returns [FIM_bs x 1]
-        elif model_output_type in ['softmax','categorical']:
-            z = model.Get_Z_softmax(ds.get_batch())
-        elif model_output_type == 'logits':
-            z = model.Get_Z_logits(ds.get_batch())
+    group_counts = np.zeros(groups)
+    group_totals = np.zeros(groups)
+
+    if FIM_bs != None:
+        ds = ds.rebatch(FIM_bs)
+
+    def update_group_totals(loss,z):
+        for (j_loss,j_z) in zip(loss.numpy(),z.numpy()):
+            for g in range(groups):
+                if j_loss <= upper_bounds[g]:
+                    if group_counts[g] < limit:
+                        group_counts[g] += 1
+                        group_totals[g] += j_z
+                        break
+                    else:
+                        break
+        #if all groups have reached their limit
+        if np.all(group_counts >= limit):
+            return True
         else:
-            z = model.Get_Z(ds.get_batch())#returns [FIM_bs x 1]
-        s += tf.reduce_sum(z)
-        data_count += FIM_bs
-    mean = s/data_count
+            return False
+
+    for step, (imgs, labels) in enumerate(ds):
+        if step % 100 == 0:
+            print(step)
+            print(group_counts)
+        if model_output_type == 'logit':
+            z,loss = model.Get_Z_logit((imgs,labels))
+        elif model_output_type == 'softmax':
+            z,loss = model.Get_Z_softmax((imgs,labels))
+
+        maxed_groups = update_group_totals(loss,z)
+        if maxed_groups:
+            break
+    #mean of each group
+    group_means = group_totals/group_counts
+    mean = np.mean(group_means)
+
+    group_means = np.array(group_means)
+    ds = ds.rebatch(bs)
     print('--> time: ',time.time()-t)
-    #convert to numpy
-    mean = mean.numpy()
-    return mean
+    if return_losses:
+        return group_means,mean,losses
+    else:
+        return group_means,mean
 
 def calc_FIM_var(ds,model,FIM_bs,limit=None):
     print('Calculating FIM (Non-Distributed) and Variance')
@@ -219,3 +270,44 @@ def calc_FIM_var(ds,model,FIM_bs,limit=None):
     print('--> time: ',time.time()-t)
     return [mean,var]
    
+
+class CustomEOE(tf.keras.callbacks.Callback):
+    #custom end of epoch callback
+    def __init__(self,ds,model,config,loss_func):
+        super().__init__()
+        self.config = config
+        self.loss_func = loss_func
+        self.ds = ds
+        self.model = model
+    def on_epoch_end(self, epoch, logs=None):
+        #Run FIM calculation
+        if self.config['FIM_calc'] == True and self.config['Loss_spec_calc'] == True and epoch % self.config['Loss_spec_freq'] == 0:
+            group_FIMs, mean_FIM,losses = calc_FIM(self.ds,
+                self.model,
+                self.config['FIM_bs'],
+                self.config['batch_size'],
+                self.loss_func,
+                limit=self.config['FIM_limit'],
+                model_output_type='softmax',
+                groups=self.config['FIM_groups'],
+                return_losses=True)
+            for i in range(len(group_FIMs)):
+                wandb.log({'FIM_group_'+str(i):group_FIMs[i]},step=epoch)
+            wandb.log({'FIM_mean':mean_FIM},step=epoch)
+            wandb.log({'loss_spectrum':losses},step=epoch)
+        elif self.config['FIM_calc'] == True:
+            group_FIMs, mean_FIM = calc_FIM(self.ds,
+                self.model,
+                self.config['FIM_bs'],
+                self.config['batch_size'],
+                self.loss_func,
+                limit=self.config['FIM_limit'],
+                model_output_type='softmax',
+                groups=self.config['FIM_groups'],
+                return_losses=False)
+            for i in range(len(group_FIMs)):
+                wandb.log({'FIM_group_'+str(i):group_FIMs[i]},step=epoch)
+            wandb.log({'FIM_mean':mean_FIM},step=epoch)
+        elif self.config['Loss_spec_calc'] == True and epoch % self.config['Loss_spec__freq'] == 0:
+            losses = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=False)
+            wandb.log({'loss_spectrum':losses},step=epoch)

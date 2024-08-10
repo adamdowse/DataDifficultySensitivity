@@ -493,7 +493,7 @@ class Data():
 
         self.current_train_batch_size = self.batch_size
 
-        return train_data, test_data, val_data
+        return train_data, test_data, None
 
     def get_flowers(self):
         #get flowers dataset from tfds

@@ -58,7 +58,8 @@ def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
 #main run file
 def main(config):
     #build model
-    
+
+
     strategy = None
     #strategy = tf.distribute.MirroredStrategy()
     if strategy is not None:
@@ -78,7 +79,10 @@ def main(config):
             model,callbacks = customModels.build_model(config)
     else:
         model,callbacks = customModels.build_model(config)
-    #model.model.summary()
+
+    
+    EOECallback = FC.CustomEOE(data.train_data,model,config,tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE))
+    callbacks.append(EOECallback)
     wandbcallback = wandb.keras.WandbCallback(save_model=False)
     callbacks.append(wandbcallback)
     print('Callbacks:',callbacks)
@@ -117,30 +121,37 @@ if __name__ == '__main__':
     print('r: ',args.r)
     print('o: ',args.o)
 
-    config = {'group':'test',
+    config = {'group':'FIMtest',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.9,0.1,0],
                 'acc_sample_weight':None,
-                'optimizer':args.o,
+                'optimizer':'SGD',
                 'momentum':0.9,
                 'dropout':0.0,
-                'lr':0.1,
+                'lr':0.01,
                 'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
-                'lr_decay_type':'percentage_step_decay', #fixed, exp_decay, percentage_step_decay
+                'lr_decay_type':'fixed', #fixed, exp_decay, percentage_step_decay
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'PA_ResNet18',
+                'model_name':'CNN',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
-                'rho':args.r, # radius of ball 
+                'rho':None, # radius of ball 
                 'rho_decay':1, # 1 = no decay
-                'm':args.m, # must be less than batch size
-                'augs': {'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
+                'm':None, # must be less than batch size
+                'augs': {"normalise":'resnet50'}, #{'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
                 'weight_reg':0.0,
-                'epochs': 200,
+                'epochs': 40,
+                'FIM_calc':True,
+                'FIM_bs':5,
+                'FIM_limit':1000,
+                'FIM_groups':8,
+                'Loss_spec_calc':True,
+                'Loss_spec_freq':5,
+
                 }
     wandb.init(project="SAM",config=config)
     main(config)

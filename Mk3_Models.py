@@ -13,14 +13,16 @@ import numpy as np
 
 import Mk2_Losses as custom_losses
 import Mk2_Data as custom_data
+import Mk2_Funcs as custom_funcs
 
 
 
 class Model(tf.keras.Model):
-    def __init__(self,model,config):
+    def __init__(self,model,config,output_is_logits):
         super().__init__()
         self.model = model
         self.config = config
+        self.output_is_logits = output_is_logits
         self.load_metrics(self.config)
         self.max_train_accuracy = 0
         self.max_test_accuracy = 0
@@ -85,27 +87,31 @@ class Model(tf.keras.Model):
     def Get_Z_softmax(self,items):
         x,y = items
         bs = tf.shape(x)[0]
+        loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
         with tf.GradientTape() as tape:
             #print(text_batch[i])
             y_hat = self.model(x,training=False) #get model output (softmax) [BS x num_classes]
+            loss = loss_func(y,y_hat)
             selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
             output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
             output = tf.math.log(output) #log the output [BS x 1]
         
-        g = tape.jacobian(output,self.model.trainable_variables)
+        j = tape.jacobian(output,self.model.trainable_variables)
         layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
-        g = [tf.reshape(g[i],(bs,layer_sizes[i])) for i in range(len(g))] #reshape the gradient to [BS x num_layer_params x layers]
-        g = tf.concat(g,axis=1) #concat the gradient over the layers [BS x num_params]
-        g = tf.square(g) #square the gradient [BS x num_params]
-        g = tf.reduce_sum(g) #sum the gradient [ 1]
-        return g
+        j = [tf.reshape(j[i],(bs,layer_sizes[i])) for i in range(len(j))] #reshape the gradient to [BS x num_layer_params x layers]
+        j = tf.concat(j,axis=1) #concat the gradient over the layers [BS x num_params]
+        j = tf.square(j) #square the gradient [BS x num_params]
+        j = tf.reduce_sum(j,axis=1) #sum the gradient [ 1]
+        return j, loss
 
     @tf.function
     def Get_Z_logits(self,items):
         imgs,labels = items
         bs = tf.shape(imgs)[0]
+        loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=True,reduction=tf.keras.losses.Reduction.NONE)
         with tf.GradientTape() as tape:
             y_hat = self.model(imgs,training=False) #get model output  [BS x num_classes]
+            loss = loss_func(labels,y_hat) #get the loss [BS x 1]
             y_hat = tf.nn.softmax(y_hat) #softmax the output [BS x num_classes]
             selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
             output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
@@ -115,8 +121,8 @@ class Model(tf.keras.Model):
         j = [tf.reshape(j[i],(bs,layer_sizes[i])) for i in range(len(j))] #reshape the jacobian to [BS x num_layer_params x layers]
         j = tf.concat(j,axis=1) #concat the jacobian over the layers [BS x num_params]
         j = tf.square(j) #square the jacobian [BS x num_params]
-        j = tf.reduce_sum(j) #sum the jacobian [BS x 1]
-        return j 
+        j = tf.reduce_sum(j,axis=1) #sum the jacobian [BS x 1]
+        return j, loss
     
 
 
@@ -126,10 +132,10 @@ def build_model(config):
     loss_func = loss_selector(config['loss_func'],config,output_is_logits)
     optimizer = optimizer_selector(config['optimizer'],config)
     metrics = metric_selector(config)
-    callbacks = callback_selector(config)
 
-    model = Model(selected_model,config)
+    model = Model(selected_model,config,output_is_logits)
     model.compile(optimizer=optimizer, loss=loss_func, metrics=metrics)
+    callbacks = callback_selector(config)
     return model, callbacks
 
 class SAM(tf.keras.optimizers.Optimizer):
@@ -243,7 +249,7 @@ class lmSAM(tf.keras.optimizers.Optimizer):
         self.m = config['m']
         self.title = f"lmSAM_SGD"
         #currently only uses catcrossent
-        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
+        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
         
 
     @tf.function
@@ -472,7 +478,7 @@ def callback_selector(config):
                 tf.keras.backend.set_value(self.model.optimizer.lr, new_lr)
             wandb.log({'lr':new_lr},commit=False)
             tf.print('Learning Rate: ',new_lr)
-    
+            
     #this defiens any callback for the fit function
     callbacks = []
     #learning rate changes
@@ -749,51 +755,52 @@ def model_selector(model_name,config):
             out = self.dense(out)
             return out
 
-    class PreActBlock(tensorflow.keras.layers.Layer):
+    class PreActBlock(tf.keras.layers.Layer):
         expansion = 1
-        def __init__(self,in_planes,planes, stride=1,dropout_rate=0.0):
+        def __init__(self,in_planes,planes, stride=1,droprate=0.0):
             super(PreActBlock,self).__init__()
 
-            self.bn1 = tensorflow.keras.layers.BatchNormalization()
-            self.conv1 = tensorflow.keras.layers.Conv2D(planes, kernel_size=3, strides=stride, padding='same', use_bias=False,kernel_initializer='he_normal')
-            self.bn2 = tensorflow.keras.layers.BatchNormalization()
+            self.bn1 = tf.keras.layers.BatchNormalization()
+            self.conv1 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=stride, padding='same', use_bias=False,kernel_initializer='he_normal')
+            self.bn2 = tf.keras.layers.BatchNormalization()
             #self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=not learnable_bn)
-            self.conv2 = tensorflow.keras.layers.Conv2D(planes, kernel_size=3, strides=1, padding='same', use_bias=False,kernel_initializer='he_normal')        
-            self.dropout = tensorflow.keras.layers.Dropout(dropout_rate)
+            self.conv2 = tf.keras.layers.Conv2D(planes, kernel_size=3, strides=1, padding='same', use_bias=False,kernel_initializer='he_normal')        
+            self.dropout = tf.keras.layers.Dropout(droprate)
             if stride != 1 or in_planes != self.expansion*planes:
-                self.shortcut = tensorflow.keras.Sequential(tensorflow.keras.layers.Conv2D(self.expansion*planes, kernel_size=1, strides=stride, use_bias=False,kernel_initializer='he_normal'))        
+                self.shortcut = tf.keras.Sequential(tf.keras.layers.Conv2D(self.expansion*planes, kernel_size=1, strides=stride, use_bias=False,kernel_initializer='he_normal'))        
             print('blockinit')
 
         def call(self,x,training=False):
-            out = tensorflow.nn.relu(self.bn1(x))
+            out = tf.nn.relu(self.bn1(x))
             out = self.dropout(out,training=training)
             shortcut = self.shortcut(out) if hasattr(self,'shortcut') else x
             out = self.conv1(out)
-            out = tensorflow.nn.relu(self.bn2(out))
+            out = tf.nn.relu(self.bn2(out))
             out = self.dropout(out,training=training)
             out = self.conv2(out)
             out += shortcut
             return out
 
-    class PreActResNet(tensorflow.keras.Model):
-        def __init__(self,block,blocks_per_layer,num_classes,dropout_rate=0.0):
+    class PreActResNet(tf.keras.Model):
+        def __init__(self,block,blocks_per_layer,num_classes,droprate=0.0):
             super(PreActResNet,self).__init__()
             self.in_planes = 64
+            self.droprate = droprate
 
-            self.conv1 = tensorflow.keras.layers.Conv2D(64,kernel_size=3, strides=1, padding='same', use_bias=False,kernel_initializer='he_normal')        
+            self.conv1 = tf.keras.layers.Conv2D(64,kernel_size=3, strides=1, padding='same', use_bias=False,kernel_initializer='he_normal')        
             self.layer1 = self._make_layer(block, 64, blocks_per_layer[0], stride=1)
             self.layer2 = self._make_layer(block, 128, blocks_per_layer[1], stride=2)
             self.layer3 = self._make_layer(block, 256, blocks_per_layer[2], stride=2)                                           
             self.layer4 = self._make_layer(block, 512, blocks_per_layer[3], stride=2)
-            self.linear = tensorflow.keras.layers.Dense(num_classes,activation='softmax',kernel_initializer='he_normal')
-            self.AP = tensorflow.keras.layers.AveragePooling2D(4)                                                               
-            self.flat = tensorflow.keras.layers.Flatten()
+            self.linear = tf.keras.layers.Dense(num_classes,activation='softmax',kernel_initializer='he_normal')
+            self.AP = tf.keras.layers.AveragePooling2D(4)                                                               
+            self.flat = tf.keras.layers.Flatten()
             print('Main init sucesess')
         def _make_layer(self, block, planes, num_blocks, stride):                                                               
             strides = [stride] + [1]*(num_blocks-1)
-            layer = tensorflow.keras.Sequential()
+            layer = tf.keras.Sequential()
             for stride in strides:
-                layer.add(block(self.in_planes,planes, stride=stride,dropout_rate=dropout_rate))
+                layer.add(block(self.in_planes,planes, stride=stride,droprate=self.droprate))
                 self.in_planes = planes * block.expansion
             return layer
 
@@ -1632,13 +1639,15 @@ def model_selector(model_name,config):
 
 def optimizer_selector(optimizer_name,config):
     if optimizer_name == 'SGD':
-        optim= tf.keras.optimizers.SGD(learning_rate=config['lr'])
+        optim= tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum'])
+    elif optimizer_name == 'Adam':
+        optim= tf.keras.optimizers.Adam(learning_rate=config['lr'])
     elif optimizer_name == 'SAM_SGD':
-        optim= SAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
+        optim= SAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'FSAM_SGD':
-        optim= FSAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
+        optim= FSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'ASAM_SGD':
-        optim= ASAM(tf.keras.optimizers.SGD(learning_rate=config['lr']),config)
+        optim= ASAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'mSAM_SGD':
         optim= mSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'lmSAM_SGD':
