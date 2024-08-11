@@ -10,7 +10,7 @@ import csv
 
 datetime = time.strftime("%Y%m%d-%H%M%S")
 
-def calc_train_loss_spectrum(dataset,model,loss_func,limit=None,sort=True,save=False):
+def calc_train_loss_spectrum(dataset,model,loss_func,limit=None,sort=True,save=False,groups=10):
     #Return the loss spectrum of all of the provided data.
     #dataset class
     #model class
@@ -31,17 +31,31 @@ def calc_train_loss_spectrum(dataset,model,loss_func,limit=None,sort=True,save=F
         else:
             loss_spectrum = np.append(loss_spectrum,losses.numpy())
        
-    if sort:
-        #sort lowest to highest
-        loss_spectrum = np.sort(loss_spectrum)
+    
+    #sort lowest to highest
+    loss_spectrum = np.sort(loss_spectrum)
+    #create the stats from the loss spectrum so dont need to save the whole thing
+    upper_bounds = np.zeros(groups)
+    group_means = np.zeros(groups)
+    group_medians = np.zeros(groups)
+    for i in range(groups):
+        #get the upper bound of each group
+        upper_bounds[i] = loss_spectrum[int((i+1)*len(loss_spectrum)/groups)-1]
+        #get the mean of each group
+        group_means[i] = np.mean(loss_spectrum[int((i)*len(loss_spectrum)/groups):int((i+1)*len(loss_spectrum)/groups)])
+        group_medians[i] = np.median(loss_spectrum[int((i)*len(loss_spectrum)/groups):int((i+1)*len(loss_spectrum)/groups)])
+    #lowest loss
+    lowest_bound = loss_spectrum[0]
+
     if save:
-        with open("LossSpectrums/"+wandb.run.id+".csv","a+") as f:
+        combined_row = np.append(lowest_bound,upper_bounds,group_means)
+        with open("LossSpectrums/"+datetime+wandb.run.id+".csv","a+") as f:
             writer = csv.writer(f)
             #write loss spectrum to file
-            writer.writerow(loss_spectrum)
+            writer.writerow(combined_row)
 
     print('--> time: ',time.time()-t)
-    return loss_spectrum
+    return loss_spectrum,lowest_bound,upper_bounds,group_means,group_medians
 
 def calc_S(ds,model,limit=None):
     #This calcualtes the S matrix trace with monty carlo estimation.
@@ -180,21 +194,16 @@ def calc_dist_FIM(ds,model,FIM_bs,limit=None):
     print('--> time: ',time.time()-t)
     return mean
 
-def calc_FIM(ds,model,FIM_bs,bs,loss_func,limit=None,model_output_type='logit',groups=None,return_losses=False):
+def calc_FIM(ds,model,FIM_bs,bs,loss_func,limit=None,model_output_type='logit',groups=None):
     #model_output_type: 'logit' or 'softmax'
     print('Calculating FIM (Non-Distributed)')
     t = time.time()
     #calcualte the losses
     if groups == None:
         groups = 1
-    if return_losses:
-        losses = calc_train_loss_spectrum(ds,model,loss_func,limit=limit,sort=True,save=True)
-    else:
-        losses = calc_train_loss_spectrum(ds,model,loss_func,limit=limit,sort=True,save=False)
-    upper_bounds = np.zeros(groups)
-    for i in range(groups):
-        upper_bounds[i] = losses[int((i+1)*len(losses)/groups)-1]
-    
+ 
+    losses,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_train_loss_spectrum(ds,model,loss_func,limit=limit,sort=True,save=False,groups=groups)
+
     if limit == None:
         limit = ds.train_count
         print("FIM limit not specified, using ",ds.train_count," data points")
@@ -239,10 +248,9 @@ def calc_FIM(ds,model,FIM_bs,bs,loss_func,limit=None,model_output_type='logit',g
     group_means = np.array(group_means)
     ds = ds.rebatch(bs)
     print('--> time: ',time.time()-t)
-    if return_losses:
-        return group_means,mean,losses
-    else:
-        return group_means,mean
+
+    return group_means,mean,losses,lowest_bound,upper_bounds,loss_group_means,loss_group_medians
+
 
 def calc_FIM_var(ds,model,FIM_bs,limit=None):
     print('Calculating FIM (Non-Distributed) and Variance')
@@ -281,33 +289,117 @@ class CustomEOE(tf.keras.callbacks.Callback):
         self.model = model
     def on_epoch_end(self, epoch, logs=None):
         #Run FIM calculation
-        if self.config['FIM_calc'] == True and self.config['Loss_spec_calc'] == True and epoch % self.config['Loss_spec_freq'] == 0:
-            group_FIMs, mean_FIM,losses = calc_FIM(self.ds,
+        if self.config['FIM_calc'] == True and self.config['Loss_spec_calc'] == True:
+            group_FIMs, mean_FIM,loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_FIM(self.ds,
                 self.model,
                 self.config['FIM_bs'],
                 self.config['batch_size'],
                 self.loss_func,
                 limit=self.config['FIM_limit'],
                 model_output_type='softmax',
-                groups=self.config['FIM_groups'],
-                return_losses=True)
-            for i in range(len(group_FIMs)):
-                wandb.log({'FIM_group_'+str(i):group_FIMs[i]},step=epoch)
-            wandb.log({'FIM_mean':mean_FIM},step=epoch)
-            wandb.log({'loss_spectrum':losses},step=epoch)
+                groups=self.config['FIM_groups'])
+            logFIM = True
+            logLoss = True
+            
         elif self.config['FIM_calc'] == True:
-            group_FIMs, mean_FIM = calc_FIM(self.ds,
+            group_FIMs, mean_FIM,loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_FIM(self.ds,
                 self.model,
                 self.config['FIM_bs'],
                 self.config['batch_size'],
                 self.loss_func,
                 limit=self.config['FIM_limit'],
                 model_output_type='softmax',
-                groups=self.config['FIM_groups'],
-                return_losses=False)
+                groups=self.config['FIM_groups'])
+            logFIM = True
+            logLoss = False
+
+        elif self.config['Loss_spec_calc'] == True and epoch % self.config['Loss_spec__freq'] == 0:
+            loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=True)
+            logFIM = False
+            logLoss = True
+
+        #log the results
+        if logFIM:
             for i in range(len(group_FIMs)):
                 wandb.log({'FIM_group_'+str(i):group_FIMs[i]},step=epoch)
             wandb.log({'FIM_mean':mean_FIM},step=epoch)
-        elif self.config['Loss_spec_calc'] == True and epoch % self.config['Loss_spec__freq'] == 0:
-            losses = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=False)
-            wandb.log({'loss_spectrum':losses},step=epoch)
+        if logLoss:
+            wandb.log({'loss_spectrum':loss_spectrum},step=epoch)
+            for i in range(len(upper_bounds)):
+                wandb.log({'lossUB_'+str(i):upper_bounds[i]},step=epoch)
+            for i in range(len(loss_group_means)):
+                wandb.log({'loss_mean_'+str(i):loss_group_means[i]},step=epoch)
+            for i in range(len(loss_group_medians)):
+                wandb.log({'loss_median_'+str(i):loss_group_medians[i]},step=epoch)
+            wandb.log({'lossLowest':lowest_bound},step=epoch)
+
+class CustomEOB(tf.keras.callbacks.Callback):
+    #custom end of batch callback
+    def __init__(self,ds,model,config,loss_func):
+        super().__init__()
+        self.config = config
+        self.loss_func = loss_func
+        self.ds = ds
+        self.model = model
+        self.epoch = 0
+        self.num_batches = 0
+    def on_epoch_begin(self, epoch, logs=None):
+        self.epoch = epoch
+    def on_epoch_end(self, epoch, logs=None):
+        if epoch == 0:
+            self.num_batches = self.latest_batch
+    def on_batch_end(self, batch, logs=None):
+        self.latest_batch = batch
+
+        #Run FIM calculation and or loss spectrum calculation
+        if batch % self.config['batch_calc_freq'] == 0 and self.epoch < self.config['batch_calc_epoch_limit']:
+            if self.config['FIM_calc'] == True and self.config['Loss_spec_calc'] == True:
+                #calc FIM and loss spectrum
+                group_FIMs, mean_FIM,loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_FIM(self.ds,
+                    self.model,
+                    self.config['FIM_bs'],
+                    self.config['batch_size'],
+                    self.loss_func,
+                    limit=self.config['FIM_limit'],
+                    model_output_type='softmax',
+                    groups=self.config['FIM_groups'])
+                logFIM = True
+                logLoss = True
+
+            elif self.config['FIM_calc'] == True:
+                #calc just the FIM
+                group_FIMs, mean_FIM,loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_FIM(self.ds,
+                    self.model,
+                    self.config['FIM_bs'],
+                    self.config['batch_size'],
+                    self.loss_func,
+                    limit=self.config['FIM_limit'],
+                    model_output_type='softmax',
+                    groups=self.config['FIM_groups'])
+                logFIM = True
+                logLoss = False
+
+            elif self.config['Loss_spec_calc'] == True:
+                #calc just the loss spectrum
+                loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=True)
+                logFIM = False
+                logLoss = True
+
+            #log the results
+            if logFIM:
+                for i in range(len(group_FIMs)):
+                    wandb.log({'b_FIM_group_'+str(i):group_FIMs[i]},step=(self.epoch*self.num_batches)+batch)
+                wandb.log({'b_FIM_mean':mean_FIM},step=(self.epoch*self.num_batches)+batch)
+            if logLoss:
+                wandb.log({'b_loss_spectrum':loss_spectrum},step=(self.epoch*self.num_batches)+batch)
+                for i in range(len(upper_bounds)):
+                    wandb.log({'b_lossUB_'+str(i):upper_bounds[i]},step=(self.epoch*self.num_batches)+batch)
+                for i in range(len(loss_group_means)):
+                    wandb.log({'b_loss_mean_'+str(i):loss_group_means[i]},step=(self.epoch*self.num_batches)+batch)
+                for i in range(len(loss_group_medians)):
+                    wandb.log({'b_loss_median_'+str(i):loss_group_medians[i]},step=(self.epoch*self.num_batches)+batch)
+                wandb.log({'b_lossLowest':lowest_bound},step=(self.epoch*self.num_batches)+batch)
+            
+
+
+            

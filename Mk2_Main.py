@@ -12,54 +12,8 @@ import Mk2_Data as DataClass
 import Mk3_Models as customModels
 import Mk2_Funcs as FC
 
-def compute_metrics(data,model,epoch,FIM_bs=1,limit=None):
-
-    
-    #model.make_softmax_model() This may be needed for current model?
-
-    #print(model.count_params())
-    #compute R
-    #R = FC.calc_R(data,model,limit=limit)
-    #wandb.log({'R_matrix_trace':R},step=epoch)
-
-    #[G_mean,S_mean,dzdt2_mean] = FC.calc_G(data,model,limit=limit)
-    #wandb.log({'G_matrix_trace':G_mean},step=epoch)
-    #wandb.log({'S_matrix_trace':S_mean},step=epoch)
-    #wandb.log({'dzdt2_matrix_trace':dzdt2_mean},step=epoch)
-
-    #wandb.log({'FullH_matrix_trace':G_mean+R},step=epoch)
-    #D = FC.calc_d2zdw2(data,model,limit=limit)
-
-    #Compute the metrics
-    #loss spectrum
-    #loss_spectrum = FC.calc_train_loss_spectrum(data,model,limit=limit)
-    #wandb.log({'loss_spectrum':loss_spectrum},step=epoch)
-
-    # #S matrix
-    # S = FC.calc_S(data,model,limit=limit)
-    # print('S matrix trace: ',S)
-    # wandb.log({'S_matrix_trace':S},step=epoch)
-
-    # #F matrix
-    F = FC.calc_FIM(data,model,FIM_bs,limit=limit,model_output_type='softmax')
-    print('F matrix trace: ',F)
-    wandb.log({'F_matrix_trace':F},step=epoch)
-
-    # #Residuals matrix
-    # R = FC.calc_residuals(data,model,limit=limit)
-    # print('Residuals: ',R)
-    # wandb.log({'Residuals':R},step=epoch)
-
-
-
-
-
-
 #main run file
 def main(config):
-    #build model
-
-
     strategy = None
     #strategy = tf.distribute.MirroredStrategy()
     if strategy is not None:
@@ -73,6 +27,7 @@ def main(config):
     data.build_data()
     config.update({'steps_per_epoch':data.steps_per_epoch})
 
+    #build model
     print('Building Model')
     if strategy is not None:
         with strategy.scope():
@@ -80,33 +35,24 @@ def main(config):
     else:
         model,callbacks = customModels.build_model(config)
 
-    
+    #Defining Callbacks
     EOECallback = FC.CustomEOE(data.train_data,model,config,tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE))
     callbacks.append(EOECallback)
+    if config['batch_calc_epoch_limit'] is not None and config['batch_calc_epoch_limit'] > 0:
+        EOBCallback = FC.CustomEOB(data.train_data,model,config,tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE))
+        callbacks.append(EOBCallback)
+    EOBCallback = FC.CustomEOB(data.train_data,model,config,tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE))
     wandbcallback = wandb.keras.WandbCallback(save_model=False)
     callbacks.append(wandbcallback)
     print('Callbacks:',callbacks)
     
-    metric_limit = 1000
-    #compute_metrics(data,model,epoch=0,FIM_bs=5,limit=metric_limit)
-    
     #train model
-    # epochs_per_step = 1
-    # for i in range(config['epochs']):
-    #     #TODO There is a memory leak most likely with dataset building each epoch
-    #     #tf error in converting index slices to tensors
-    #     print('Training Epoch: ',(i+1)*epochs_per_step)
-    #     model.fit(data.train_data,batch_size=config['batch_size'],shuffle=True,validation_data=data.test_data,epochs=epochs_per_step,callbacks=[wandb.keras.WandbCallback(save_model=False)])
-    #     #compute_metrics(data,model,epoch=(i+1)*epochs_per_step,FIM_bs=5,limit=metric_limit)
-    #lr_callback = tf.keras.callbacks.LearningRateScheduler(customModels.lr_selector(config['lr_decay_type'],config), verbose=1)
     model.fit(data.train_data,
         batch_size=config['batch_size'],
         shuffle=True,
         validation_data=data.test_data,
         epochs=config['epochs'],
         callbacks=callbacks)
-
-
 
 if __name__ == '__main__':
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
@@ -145,13 +91,14 @@ if __name__ == '__main__':
                 'augs': {"normalise":'resnet50'}, #{'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
                 'weight_reg':0.0,
                 'epochs': 40,
+                'batch_calc_epoch_limit':2, #limit for using batch calcs and logging, if None or 0 then recording is off
+                'batch_calc_freq':5,
                 'FIM_calc':True,
                 'FIM_bs':5,
                 'FIM_limit':1000,
                 'FIM_groups':8,
                 'Loss_spec_calc':True,
                 'Loss_spec_freq':5,
-
                 }
     wandb.init(project="SAM",config=config)
     main(config)
