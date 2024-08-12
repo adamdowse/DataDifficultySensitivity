@@ -701,67 +701,103 @@ def model_selector(model_name,config):
             x = tf.keras.layers.add([conv2,shortcut])
             return x
 
+    class ResBlock(tf.keras.layers.Layer):
+        def __init__(self,filters,downsample=False,strides=(2,2),reg=0,bnEps=2e-5,bnMom=0.9,bottleneck=True):
+            super(ResBlock,self).__init__()
+            self.bn1 = tf.keras.layers.BatchNormalization(epsilon=bnEps,momentum=bnMom)
+            self.act1 = tf.keras.layers.Activation('relu')
+            if bottleneck:
+                self.conv1 = tf.keras.layers.Conv2D(int(filters*0.25),(1,1),strides=(1,1),padding='same',use_bias=False,kernel_initializer='he_normal',kernel_regularizer=keras.regularizers.l2(reg))
+            else:
+                self.conv1 = tf.keras.layers.Conv2D(filters,(1,1),strides=(1,1),padding='same',use_bias=False,kernel_initializer='he_normal',kernel_regularizer=keras.regularizers.l2(reg))
+            self.bn2 = tf.keras.layers.BatchNormalization(epsilon=bnEps,momentum=bnMom)
+            self.act2 = tf.keras.layers.Activation('relu')
+            if bottleneck:
+                self.conv2 = tf.keras.layers.Conv2D(int(filters*0.25),(3,3),strides=strides,padding='same',use_bias=False,kernel_initializer='he_normal')
+            else:
+                self.conv2 = tf.keras.layers.Conv2D(filters,(3,3),strides=strides,padding='same',use_bias=False,kernel_initializer='he_normal')
+            self.bn3 = tf.keras.layers.BatchNormalization(epsilon=bnEps,momentum=bnMom)
+            self.act3 = tf.keras.layers.Activation('relu')
+            self.conv3 = tf.keras.layers.Conv2D(filters,(1,1),strides=(1,1),padding='same',use_bias=False,kernel_initializer='he_normal')
+
+            self.downsample = downsample
+            self.shortcut = tf.keras.layers.Conv2D(filters,(1,1),strides=strides,padding='same',use_bias=False,kernel_initializer='he_normal')
+            self.strides = strides
+            self.filters = filters
+
+            
+        def __call__(self,x,training=False):
+            shortcut = x
+            x = self.bn1(x)
+            x = self.act1(x)
+            out = self.conv1(x)
+            
+            out = self.bn2(out)
+            out = self.act2(out)
+            out = self.conv2(out)
+
+            out = self.bn3(out)
+            out = self.act3(out)
+            out = self.conv3(out)
+            if self.downsample:
+                shortcut = self.shortcut(x)
+            out += shortcut
+            return out
+
     class CifarResNet(tf.keras.Model):
+        #ResNet with bottelnecking and pre-activation
         #https://stackoverflow.com/questions/71057776/why-does-my-resnet56-implementation-have-less-accuracy-than-in-the-original-pape
         #https://arxiv.org/pdf/1512.03385.pdf
-        class ResBlock(tf.Module):
-            def __init__(self,filters,downsample=False):
-                super().__init__()
-                if downsample:
-                    strides = (2,2)
-                else:
-                    strides = (1,1)
-                self.conv1 = tf.keras.layers.Conv2D(filters,3,strides,padding='same',use_bias=False,kernel_initializer='he_normal')
-                self.bn1 = tf.keras.layers.BatchNormalization()
-                self.act1 = tf.keras.layers.Activation('relu')
-                self.conv2 = tf.keras.layers.Conv2D(filters,3,1,padding='same',use_bias=False,kernel_initializer='he_normal')
-                self.bn2 = tf.keras.layers.BatchNormalization()
-                if downsample:
-                    self.downsample = tf.keras.layers.Conv2D(filters,1,strides=(2,2),padding='same',use_bias=False,kernel_initializer='he_normal')
-                else:
-                    self.downsample = tf.keras.layers.Lambda(lambda x: x)
-                self.act2 = tf.keras.layers.Activation('relu')
-            def __call__(self,x,training=False):
-                out = self.conv1(x)
-                out = self.bn1(out)
-                out = self.act1(out)
-                out = self.conv2(out)
-                out = self.bn2(out)
-                skip = self.downsample(x)
-                out += skip
-                out = self.act2(out)
-                return out
-        def __init__(self,num_classes,filters=[16,32,64],n=9,REG=0):
-            super().__init__()
-            self.conv1 = tf.keras.layers.Conv2D(filters[0],3,1,padding='same',use_bias=False,kernel_initializer='he_normal')
-            self.bn1 = tf.keras.layers.BatchNormalization()
-            self.act1 = tf.keras.layers.Activation('relu')
+        #https://github.com/meng1994412/ResNet_from_scratch/blob/master/pipeline/nn/conv/resnet.py
+        
+        def __init__(self,num_classes,filters=[64,128,256],n=9,REG=0,bnEps=2e-5,bnMom=0.9,bottleneck=True):
+            super(CifarResNet,self).__init__()
             self.filters = filters
             self.n = n
-            self.rb1 = self.ResBlock(filters[0],downsample=False)
-            self.rb2_downsample = self.ResBlock(filters[1],downsample=True)
-            self.rb2 = self.ResBlock(filters[1],downsample=False)
-            self.rb3_downsample = self.ResBlock(filters[2],downsample=True)
-            self.rb3 = self.ResBlock(filters[2],downsample=False)
-            self.GAP = tf.keras.layers.GlobalAveragePooling2D()
-            self.dense = tf.keras.layers.Dense(num_classes,activation='softmax')
+            self.REG = REG
+            self.bottleneck = bottleneck
 
-        def call(self,x,training=False):
-            out = self.conv1(x)
-            out = self.bn1(out)
+            self.bn1 = tf.keras.layers.BatchNormalization(epsilon=bnEps,momentum=bnMom)
+            self.conv1 = tf.keras.layers.Conv2D(filters[0],(3,3),strides=(1,1),padding='same',use_bias=False,kernel_initializer='he_normal',kernel_regularizer=keras.regularizers.l2(REG))
+
+            self.block1 = self._make_layer(0)
+            self.block2 = self._make_layer(1)
+            self.block3 = self._make_layer(2)
+
+            self.bn2 = tf.keras.layers.BatchNormalization(epsilon=bnEps,momentum=bnMom)
+            self.act1 = tf.keras.layers.Activation('relu')
+            self.ap = tf.keras.layers.AveragePooling2D((8,8))
+            self.flatten = tf.keras.layers.Flatten()
+            self.dense = tf.keras.layers.Dense(num_classes,activation='softmax',kernel_regularizer=keras.regularizers.l2(REG))
+
+        def _make_layer(self,layer_id):
+            seq_model = tf.keras.Sequential()
+            if layer_id == 0:
+                seq_model.add(ResBlock(self.filters[0],strides=(1,1),downsample=True,reg=self.REG,bottleneck=self.bottleneck))
+                for i in range(self.n-1):
+                    seq_model.add(ResBlock(self.filters[0],strides=(1,1),downsample=False,reg=self.REG,bottleneck=self.bottleneck))
+            elif layer_id == 1:
+                seq_model.add(ResBlock(self.filters[1],strides=(2,2),downsample=True,reg=self.REG,bottleneck=self.bottleneck))
+                for i in range(self.n-1):
+                    seq_model.add(ResBlock(self.filters[1],strides=(1,1),downsample=False,reg=self.REG,bottleneck=self.bottleneck))
+            elif layer_id == 2:
+                seq_model.add(ResBlock(self.filters[2],strides=(2,2),downsample=True,reg=self.REG,bottleneck=self.bottleneck))
+                for i in range(self.n-1):
+                    seq_model.add(ResBlock(self.filters[2],strides=(1,1),downsample=False,reg=self.REG,bottleneck=self.bottleneck))
+            return seq_model
+
+        def call(self,inputs,training=False):
+            out = self.bn1(inputs)
+            out = self.conv1(out)
+
+            out = self.block1(out)
+            out = self.block2(out)
+            out = self.block3(out)
+            
+            out = self.bn2(out)
             out = self.act1(out)
-            for i in range(self.n):
-                out = self.rb1(out)
-            
-            out = self.rb2_downsample(out)
-            for i in range(self.n-1):
-                out = self.rb2(out)
-            
-            out = self.rb3_downsample(out)
-            for i in range(self.n-1):
-                out = self.rb3(out)
-            
-            out = self.GAP(out)
+            out = self.ap(out)
+            out = self.flatten(out)
             out = self.dense(out)
             return out
 
@@ -1394,10 +1430,10 @@ def model_selector(model_name,config):
         output_is_logits = False
 
     elif config['model_name'] == 'CifarResNet56':
-        model = CifarResNet(10,n=9)
-        inputs = tf.keras.Input(shape=config['img_size'])
-        model = keras.Model(inputs, model(inputs))
+        model = CifarResNet(10,n=9,REG=config['weight_reg'],filters=[64,128,256],bottleneck=True)
+        model.build(input_shape=(None,32,32,3))
         output_is_logits = False
+
 
 
 

@@ -1,5 +1,5 @@
 universe = docker
-docker_image = container-registry.surrey.ac.uk/shared-containers/ad00878:SHA_53cc6ff0
+docker_image = container-registry.surrey.ac.uk/shared-containers/ad00878:SHA_f82351d9
 #ad00878:SHA_7c5920db
 
 executable = /usr/bin/python3

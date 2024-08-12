@@ -45,6 +45,9 @@ def main(config):
     wandbcallback = wandb.keras.WandbCallback(save_model=False)
     callbacks.append(wandbcallback)
     print('Callbacks:',callbacks)
+
+    #show model summary
+    print(model.model.summary(expand_nested=True))
     
     #train model
     model.fit(data.train_data,
