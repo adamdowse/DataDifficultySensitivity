@@ -631,12 +631,12 @@ def model_selector(model_name,config):
         #block type = string of either 'basic_block' or 'block'
         #shortcut type = string of either 'identity' or 'projection'
         initializer = tf.keras.initializers.HeNormal()
-        if block_type == 'basic_block':
-            block_fn = BasicBlock
-        elif block_type == 'block':
-            block_fn = PreActBlock
-        else:
-            raise ValueError('Block type not recognised')
+        # if block_type == 'basic_block':
+        #     block_fn = BasicBlock
+        # elif block_type == 'block':
+        #     block_fn = PreActBlock
+        # else:
+        #     raise ValueError('Block type not recognised')
         def BasicBlock(x,filters,kernel_size=3,stride=1,conv_shortcut=False):
             preact = tf.keras.layers.BatchNormalization(axis=3)(x)
             preact = tf.keras.layers.ReLU()(preact)
@@ -663,13 +663,14 @@ def model_selector(model_name,config):
             return x
 
         def ResBlocks(x):
-            stackwise_dialations = [1]*len(stackwise_features)
-            filter_size = init_feature_maps
+            #stackwise_dialations = [1]*len(stackwise_features)
+            #filter_size = init_feature_maps
             for layer_group in range(len(stackwise_features)):
                 for block in range(n):
                     if layer_group > 0 and block == 0:
-                        filter_size = filter_size * 2
-                        x = BasicBlock(x,filter_size,match_filter_size=True)
+                        #filter_size = filter_size * 2
+                        #x = BasicBlock(x,filter_size,match_filter_size=True)
+                        x = BasicBlock(x,stackwise_features[layer_group],match_filter_size=True)
                     else:
                         x = BasicBlock(x,filter_size)
             return x
@@ -685,9 +686,87 @@ def model_selector(model_name,config):
             return output
         return resnet(x)
 
-    
+    #https://github.com/meng1994412/ResNet_from_scratch
+    def mengResNet56(x,num_classes,REG=0):
+        def residual_module(x,features,stride,chanDim,reduce=False,REG=0,bnEps=2e-5,bnMom=0.9):
+            shortcut = x
+            bn1 = tf.keras.layers.BatchNormalization(axis=chanDim,epsilon=bnEps,momentum=bnMom)(x)
+            act1 = tf.keras.layers.Activation('relu')(bn1)
+            conv1 = tf.keras.layers.Conv2D(features,(3,3),strides=stride,padding='same',kernel_regularizer=keras.regularizers.l2(REG))(act1)
+            bn2 = tf.keras.layers.BatchNormalization(axis=chanDim,epsilon=bnEps,momentum=bnMom)(conv1)
+            act2 = tf.keras.layers.Activation('relu')(bn2)
+            conv2 = tf.keras.layers.Conv2D(features,(3,3),strides=(1,1),padding='same',kernel_regularizer=keras.regularizers.l2(REG))(act2)
+            if reduce:
+                shortcut = tf.keras.layers.Conv2D(features,(1,1),strides=stride,padding='same',kernel_regularizer=keras.regularizers.l2(REG))(act1)
+            x = tf.keras.layers.add([conv2,shortcut])
+            return x
+
+    class CifarResNet(tf.keras.Model):
+        #https://stackoverflow.com/questions/71057776/why-does-my-resnet56-implementation-have-less-accuracy-than-in-the-original-pape
+        #https://arxiv.org/pdf/1512.03385.pdf
+        class ResBlock(tf.Module):
+            def __init__(self,filters,downsample=False):
+                super().__init__()
+                if downsample:
+                    strides = (2,2)
+                else:
+                    strides = (1,1)
+                self.conv1 = tf.keras.layers.Conv2D(filters,3,strides,padding='same',use_bias=False,kernel_initializer='he_normal')
+                self.bn1 = tf.keras.layers.BatchNormalization()
+                self.act1 = tf.keras.layers.Activation('relu')
+                self.conv2 = tf.keras.layers.Conv2D(filters,3,1,padding='same',use_bias=False,kernel_initializer='he_normal')
+                self.bn2 = tf.keras.layers.BatchNormalization()
+                if downsample:
+                    self.downsample = tf.keras.layers.Conv2D(filters,1,strides=(2,2),padding='same',use_bias=False,kernel_initializer='he_normal')
+                else:
+                    self.downsample = tf.keras.layers.Lambda(lambda x: x)
+                self.act2 = tf.keras.layers.Activation('relu')
+            def __call__(self,x,training=False):
+                out = self.conv1(x)
+                out = self.bn1(out)
+                out = self.act1(out)
+                out = self.conv2(out)
+                out = self.bn2(out)
+                skip = self.downsample(x)
+                out += skip
+                out = self.act2(out)
+                return out
+        def __init__(self,num_classes,filters=[16,32,64],n=9,REG=0):
+            super().__init__()
+            self.conv1 = tf.keras.layers.Conv2D(filters[0],3,1,padding='same',use_bias=False,kernel_initializer='he_normal')
+            self.bn1 = tf.keras.layers.BatchNormalization()
+            self.act1 = tf.keras.layers.Activation('relu')
+            self.filters = filters
+            self.n = n
+            self.rb1 = self.ResBlock(filters[0],downsample=False)
+            self.rb2_downsample = self.ResBlock(filters[1],downsample=True)
+            self.rb2 = self.ResBlock(filters[1],downsample=False)
+            self.rb3_downsample = self.ResBlock(filters[2],downsample=True)
+            self.rb3 = self.ResBlock(filters[2],downsample=False)
+            self.GAP = tf.keras.layers.GlobalAveragePooling2D()
+            self.dense = tf.keras.layers.Dense(num_classes,activation='softmax')
+
+        def call(self,x,training=False):
+            out = self.conv1(x)
+            out = self.bn1(out)
+            out = self.act1(out)
+            for i in range(self.n):
+                out = self.rb1(out)
+            
+            out = self.rb2_downsample(out)
+            for i in range(self.n-1):
+                out = self.rb2(out)
+            
+            out = self.rb3_downsample(out)
+            for i in range(self.n-1):
+                out = self.rb3(out)
+            
+            out = self.GAP(out)
+            out = self.dense(out)
+            return out
 
 
+                
     class WideBasic(tf.keras.layers.Layer):
         def __init__(self,in_planes,planes,stride,droprate,REG=0.0):
             super(WideBasic,self).__init__()
@@ -1313,6 +1392,14 @@ def model_selector(model_name,config):
         outputs = resnetV2(inputs,[64,128,256,512],[2,2,2,2],[1,2,2,2],'basic_block',config['num_classes'],REG=0)
         model = keras.Model(inputs, outputs)
         output_is_logits = False
+
+    elif config['model_name'] == 'CifarResNet56':
+        model = CifarResNet(10,n=9)
+        inputs = tf.keras.Input(shape=config['img_size'])
+        model = keras.Model(inputs, model(inputs))
+        output_is_logits = False
+
+
 
 
     elif config['model_name'] == "PA_ResNet18":

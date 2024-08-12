@@ -317,6 +317,10 @@ class CustomEOE(tf.keras.callbacks.Callback):
             loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=True)
             logFIM = False
             logLoss = True
+        
+        else:
+            logFIM = False
+            logLoss = False
 
         #log the results
         if logFIM:
@@ -384,6 +388,10 @@ class CustomEOB(tf.keras.callbacks.Callback):
                 loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=True)
                 logFIM = False
                 logLoss = True
+            
+            else:
+                logFIM = False
+                logLoss = False
 
             #log the results
             if logFIM:

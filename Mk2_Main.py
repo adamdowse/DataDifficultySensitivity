@@ -72,7 +72,7 @@ if __name__ == '__main__':
                 'data_name':'cifar10',
                 'data_split':[0.9,0.1,0],
                 'acc_sample_weight':None,
-                'optimizer':'SGD',
+                'optimizer':args.o,
                 'momentum':0.9,
                 'dropout':0.0,
                 'lr':0.01,
@@ -81,23 +81,23 @@ if __name__ == '__main__':
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'CNN',
+                'model_name':'CifarResNet56',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
-                'rho':None, # radius of ball 
+                'rho':args.r, # radius of ball 
                 'rho_decay':1, # 1 = no decay
-                'm':None, # must be less than batch size
+                'm':args.m, # must be less than batch size
                 'augs': {"normalise":'resnet50'}, #{'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
                 'weight_reg':0.0,
                 'epochs': 40,
                 'batch_calc_epoch_limit':2, #limit for using batch calcs and logging, if None or 0 then recording is off
                 'batch_calc_freq':5,
-                'FIM_calc':True,
+                'FIM_calc':False,
                 'FIM_bs':5,
                 'FIM_limit':1000,
                 'FIM_groups':8,
-                'Loss_spec_calc':True,
+                'Loss_spec_calc':False,
                 'Loss_spec_freq':5,
                 }
     wandb.init(project="SAM",config=config)
