@@ -84,7 +84,7 @@ if __name__ == '__main__':
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'CifarResNet56',
+                'model_name':'CNN',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
@@ -93,15 +93,17 @@ if __name__ == '__main__':
                 'm':args.m, # must be less than batch size
                 'augs': {"normalise":'resnet50'}, #{'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
                 'weight_reg':0.0,
-                'epochs': 40,
-                'batch_calc_epoch_limit':2, #limit for using batch calcs and logging, if None or 0 then recording is off
-                'batch_calc_freq':5,
+                'epochs': 1,
+                'batch_calc_epoch_limit':1, #limit for using batch calcs and logging, if None or 0 then recording is off
+                'batch_calc_freq':1,
+                'epoch_calc_freq':1,
                 'FIM_calc':False,
                 'FIM_bs':5,
                 'FIM_limit':1000,
                 'FIM_groups':8,
                 'Loss_spec_calc':False,
-                'Loss_spec_freq':5,
+                'Grad_alignment_calc':True,
+                'Grad_bs':5,
                 }
     wandb.init(project="SAM",config=config)
     main(config)

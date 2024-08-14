@@ -211,7 +211,7 @@ def calc_FIM(ds,model,FIM_bs,bs,loss_func,limit=None,model_output_type='logit',g
     group_totals = np.zeros(groups)
 
     if FIM_bs != None:
-        ds = ds.rebatch(FIM_bs)
+        ds = ds.unbatch().batch(FIM_bs)
 
     def update_group_totals(loss,z):
         for (j_loss,j_z) in zip(loss.numpy(),z.numpy()):
@@ -221,8 +221,7 @@ def calc_FIM(ds,model,FIM_bs,bs,loss_func,limit=None,model_output_type='logit',g
                         group_counts[g] += 1
                         group_totals[g] += j_z
                         break
-                    else:
-                        break
+                    
         #if all groups have reached their limit
         if np.all(group_counts >= limit):
             return True
@@ -246,7 +245,8 @@ def calc_FIM(ds,model,FIM_bs,bs,loss_func,limit=None,model_output_type='logit',g
     mean = np.mean(group_means)
 
     group_means = np.array(group_means)
-    ds = ds.rebatch(bs)
+    if FIM_bs != None:
+        ds = ds.unbatch().batch(bs)
     print('--> time: ',time.time()-t)
 
     return group_means,mean,losses,lowest_bound,upper_bounds,loss_group_means,loss_group_medians
@@ -277,6 +277,64 @@ def calc_FIM_var(ds,model,FIM_bs,limit=None):
     var /= data_count
     print('--> time: ',time.time()-t)
     return [mean,var]
+
+def calc_grad_alignment(ds,model,grad_bs,bs,limit=None,groups=None,upper_bounds=None):
+    #calc the alignment of each subset to the average of all data
+    print('Calculating Gradient Alignment')
+    t = time.time()
+    if limit == None:
+        limit = ds.train_count
+        print("Grad Alignment limit not specified, using ",ds.train_count," data points")
+    if groups == None:
+        groups = 1
+
+    if upper_bounds == None:
+        #need to calc the upper bounds
+        _,_,upper_bounds,_,_ = calc_train_loss_spectrum(ds,model,tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE),limit=limit,sort=True,save=False,groups=groups)
+
+    avg_grad = tf.zeros(model.get_params_shape())
+    group_counts = np.zeros(groups)
+    group_totals = np.zeros((groups,model.get_params_shape()))
+    
+    ds = ds.unbatch().batch(grad_bs)
+    for step, batch in enumerate(ds):
+        if step % 100 == 0:
+            print(step)
+
+        grads,losses = model.Get_grads(batch) 
+        avg_grad += np.sum(grads,axis=0)
+        for (j_grad,j_loss) in zip(grads,losses):
+            for g in range(groups):
+                if j_loss <= upper_bounds[g]:
+                    group_counts[g] += 1
+                    group_totals[g] += j_grad
+                    break
+        if np.all(group_counts >= limit):
+            break
+
+    avg_grad /= np.sum(group_counts,axis=0) #average gradient
+    #calc the average gradient for each group (need to divide by the number of data points in each group)
+    for i in range(groups):
+        group_totals[i] /= group_counts[i]
+
+    #calc the norms
+    avg_norm = np.linalg.norm(avg_grad)
+    group_norms = np.linalg.norm(group_totals,axis=1) #check axis
+    print('avg_norm: ',avg_norm)
+    print('group_norms: ',group_norms)
+
+    #calc the cosine similarity
+    avg_cos = np.zeros(groups)
+    for i in range(groups):
+        if avg_norm*group_norms[i] == 0:
+            avg_cos[i] = np.nan
+        avg_cos[i] = np.dot(avg_grad,group_totals[i])/(avg_norm*group_norms[i])
+    print('avg_cos: ',avg_cos)
+
+    ds = ds.unbatch().batch(bs)
+    print('--> time: ',time.time()-t)
+    return avg_cos,avg_norm,group_norms
+
    
 
 class CustomEOE(tf.keras.callbacks.Callback):
@@ -289,53 +347,63 @@ class CustomEOE(tf.keras.callbacks.Callback):
         self.model = model
     def on_epoch_end(self, epoch, logs=None):
         #Run FIM calculation
-        if self.config['FIM_calc'] == True and self.config['Loss_spec_calc'] == True:
-            group_FIMs, mean_FIM,loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_FIM(self.ds,
-                self.model,
-                self.config['FIM_bs'],
-                self.config['batch_size'],
-                self.loss_func,
-                limit=self.config['FIM_limit'],
-                model_output_type='softmax',
-                groups=self.config['FIM_groups'])
-            logFIM = True
-            logLoss = True
+        if epoch % self.config['epoch_calc_freq'] == 0:
+            #calc FIM and or loss spectrum
+            if self.config['FIM_calc'] == True and self.config['Loss_spec_calc'] == True:
+                group_FIMs, mean_FIM,loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_FIM(self.ds,
+                    self.model,
+                    self.config['FIM_bs'],
+                    self.config['batch_size'],
+                    self.loss_func,
+                    limit=self.config['FIM_limit'],
+                    model_output_type='softmax',
+                    groups=self.config['FIM_groups'])
+                logFIM = True
+                logLoss = True
+                
+            elif self.config['FIM_calc'] == True:
+                group_FIMs, mean_FIM,loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_FIM(self.ds,
+                    self.model,
+                    self.config['FIM_bs'],
+                    self.config['batch_size'],
+                    self.loss_func,
+                    limit=self.config['FIM_limit'],
+                    model_output_type='softmax',
+                    groups=self.config['FIM_groups'])
+                logFIM = True
+                logLoss = False
+
+            elif self.config['Loss_spec_calc'] == True:
+                loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=True)
+                logFIM = False
+                logLoss = True
             
-        elif self.config['FIM_calc'] == True:
-            group_FIMs, mean_FIM,loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_FIM(self.ds,
-                self.model,
-                self.config['FIM_bs'],
-                self.config['batch_size'],
-                self.loss_func,
-                limit=self.config['FIM_limit'],
-                model_output_type='softmax',
-                groups=self.config['FIM_groups'])
-            logFIM = True
-            logLoss = False
+            else:
+                logFIM = False
+                logLoss = False
 
-        elif self.config['Loss_spec_calc'] == True and epoch % self.config['Loss_spec__freq'] == 0:
-            loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=True)
-            logFIM = False
-            logLoss = True
-        
-        else:
-            logFIM = False
-            logLoss = False
+            #calc grad alignment
+            if self.config['Grad_alignment_calc'] == True:
+                avg_cos,avg_norm,group_norms = calc_grad_alignment(self.ds,self.model,self.config['Grad_bs'],self.config['batch_size'],limit=self.config['FIM_limit'],groups=self.config['FIM_groups'])
+                wandb.log({'avg_norm':avg_norm},step=epoch)
+                for i in range(len(group_norms)):
+                    wandb.log({'group_norm_'+str(i):group_norms[i]},step=epoch)
+                    wandb.log({'avg_cos_'+str(i):avg_cos[i]},step=epoch)
 
-        #log the results
-        if logFIM:
-            for i in range(len(group_FIMs)):
-                wandb.log({'FIM_group_'+str(i):group_FIMs[i]},step=epoch)
-            wandb.log({'FIM_mean':mean_FIM},step=epoch)
-        if logLoss:
-            wandb.log({'loss_spectrum':loss_spectrum},step=epoch)
-            for i in range(len(upper_bounds)):
-                wandb.log({'lossUB_'+str(i):upper_bounds[i]},step=epoch)
-            for i in range(len(loss_group_means)):
-                wandb.log({'loss_mean_'+str(i):loss_group_means[i]},step=epoch)
-            for i in range(len(loss_group_medians)):
-                wandb.log({'loss_median_'+str(i):loss_group_medians[i]},step=epoch)
-            wandb.log({'lossLowest':lowest_bound},step=epoch)
+            #log the results
+            if logFIM:
+                for i in range(len(group_FIMs)):
+                    wandb.log({'FIM_group_'+str(i):group_FIMs[i]},step=epoch)
+                wandb.log({'FIM_mean':mean_FIM},step=epoch)
+            if logLoss:
+                wandb.log({'loss_spectrum':loss_spectrum},step=epoch)
+                for i in range(len(upper_bounds)):
+                    wandb.log({'lossUB_'+str(i):upper_bounds[i]},step=epoch)
+                for i in range(len(loss_group_means)):
+                    wandb.log({'loss_mean_'+str(i):loss_group_means[i]},step=epoch)
+                for i in range(len(loss_group_medians)):
+                    wandb.log({'loss_median_'+str(i):loss_group_medians[i]},step=epoch)
+                wandb.log({'lossLowest':lowest_bound},step=epoch)
 
 class CustomEOB(tf.keras.callbacks.Callback):
     #custom end of batch callback
@@ -392,6 +460,20 @@ class CustomEOB(tf.keras.callbacks.Callback):
             else:
                 logFIM = False
                 logLoss = False
+
+            #calc grad alignment
+            if self.config['Grad_alignment_calc'] == True:
+                if logLoss:
+                    avg_cos,avg_norm,group_norms = calc_grad_alignment(self.ds,self.model,self.config['Grad_bs'],self.config['batch_size'],limit=self.config['FIM_limit'],groups=self.config['FIM_groups'],upper_bounds=upper_bounds)
+                else:
+                    avg_cos,avg_norm,group_norms = calc_grad_alignment(self.ds,self.model,self.config['Grad_bs'],self.config['batch_size'],limit=self.config['FIM_limit'],groups=self.config['FIM_groups'])
+                print('avg_norm: ',avg_norm)
+                print('group_norms: ',len(group_norms))
+                print('avg_cos: ',len(avg_cos))
+                wandb.log({'avg_norm':avg_norm},step=(self.epoch*self.num_batches)+batch)
+                for i in range(len(group_norms)):
+                    wandb.log({'group_norm_'+str(i):group_norms[i]},step=(self.epoch*self.num_batches)+batch)
+                    wandb.log({'avg_cos_'+str(i):avg_cos[i]},step=(self.epoch*self.num_batches)+batch)
 
             #log the results
             if logFIM:

@@ -43,7 +43,7 @@ class Model(tf.keras.Model):
     @tf.function
     def train_step(self, data):
         x, y = data
-        if self.config['optimizer'] == 'SGD':
+        if self.config['optimizer'] in ['SGD','Adam']:
             with tf.GradientTape() as tape:
                 y_hat = self.model(x, training=True)  # Forward pass
                 loss = self.compiled_loss(y, y_hat)
@@ -123,7 +123,26 @@ class Model(tf.keras.Model):
         j = tf.square(j) #square the jacobian [BS x num_params]
         j = tf.reduce_sum(j,axis=1) #sum the jacobian [BS x 1]
         return j, loss
-    
+
+    @tf.function
+    def Get_grads(self,items):
+        x,y = items
+        bs = tf.shape(x)[0]
+        loss_func = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
+        with tf.GradientTape() as tape:
+            y_hat = self.model(x,training=False)
+            loss = loss_func(y,y_hat)
+        j = tape.jacobian(loss, self.model.trainable_variables)
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
+        j = [tf.reshape(j[i],(bs,layer_sizes[i])) for i in range(len(j))] # 
+        j = tf.concat(j,axis=1) #[BS x num_params] as tf
+        return j, loss 
+
+    @tf.function
+    def get_params_shape(self):
+        p = [tf.reshape(v,[-1]) for v in self.model.trainable_variables]
+        p = tf.concat(p,axis=0)
+        return p.shape[0]
 
 
 
