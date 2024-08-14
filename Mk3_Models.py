@@ -1167,22 +1167,22 @@ def model_selector(model_name,config):
     #     ])
     #     self.output_is_logits = False
     #     self.new_img_size = self.img_shape
-    # elif config['model_name'] == "CNN5":
-    #     self.model = tf.keras.Sequential([
-    #         tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
-    #         tf.keras.layers.MaxPool2D((2,2)),
-    #         tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-    #         tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
-    #         tf.keras.layers.MaxPool2D((2,2)),
-    #         tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
-    #         tf.keras.layers.MaxPool2D((2,2)),
-    #         tf.keras.layers.Flatten(),
-    #         tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
-    #         tf.keras.layers.Dense(self.num_classes, kernel_initializer=initialiser),
-    #         tf.keras.layers.Softmax()
-    #     ])
-    #     self.output_is_logits = False
-    #     self.new_img_size = self.img_shape
+    elif config['model_name'] == "CNN5":
+        model = tf.keras.Sequential([
+            tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=config['img_size'], kernel_initializer=initialiser),
+            tf.keras.layers.MaxPool2D((2,2)),
+            tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+            tf.keras.layers.Conv2D(64,3,activation='relu', kernel_initializer=initialiser),
+            tf.keras.layers.MaxPool2D((2,2)),
+            tf.keras.layers.Conv2D(128,3,activation='relu', kernel_initializer=initialiser),
+            tf.keras.layers.MaxPool2D((2,2)),
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(128,activation='relu', kernel_initializer=initialiser),
+            tf.keras.layers.Dense(config['num_classes'], kernel_initializer=initialiser),
+            tf.keras.layers.Softmax()
+        ])
+        output_is_logits = False
+
     # elif config['model_name'] == "CNN5_Scale-1to1":
     #     self.model = tf.keras.Sequential([
     #         tf.keras.layers.Conv2D(32,3,activation='relu',input_shape=self.img_shape, kernel_initializer=initialiser),
