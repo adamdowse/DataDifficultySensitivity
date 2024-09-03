@@ -70,7 +70,7 @@ if __name__ == '__main__':
     print('r: ',args.r)
     print('o: ',args.o)
 
-    config = {'group':'FIMtest',
+    config = {'group':'LookSAM',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.9,0.1,0],
@@ -78,7 +78,7 @@ if __name__ == '__main__':
                 'optimizer':args.o,
                 'momentum':0.9,
                 'dropout':0.0,
-                'lr':0.01,
+                'lr':0.001,
                 'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
                 'lr_decay_type':'fixed', #fixed, exp_decay, percentage_step_decay
                 'batch_size':128,
@@ -93,7 +93,8 @@ if __name__ == '__main__':
                 'm':args.m, # must be less than batch size
                 'augs': {"normalise":'resnet50'}, #{'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
                 'weight_reg':0.0,
-                'epochs': 1,
+                'epochs': 40,
+
                 'batch_calc_epoch_limit':1, #limit for using batch calcs and logging, if None or 0 then recording is off
                 'batch_calc_freq':1,
                 'epoch_calc_freq':1,
@@ -102,8 +103,8 @@ if __name__ == '__main__':
                 'FIM_limit':1000,
                 'FIM_groups':8,
                 'Loss_spec_calc':False,
-                'Grad_alignment_calc':True,
+                'Grad_alignment_calc':False,
                 'Grad_bs':5,
                 }
-    wandb.init(project="SAM",config=config)
+    wandb.init(project="LookSAM",config=config)
     main(config)

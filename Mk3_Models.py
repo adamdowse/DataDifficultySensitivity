@@ -40,6 +40,9 @@ class Model(tf.keras.Model):
     def compile(self,optimizer,loss,metrics=None):
         super().compile(optimizer=optimizer,loss=loss,metrics=metrics)
 
+    def _log(items,step):
+        wandb.log(items,step=step)
+
     @tf.function
     def train_step(self, data):
         x, y = data
@@ -51,7 +54,9 @@ class Model(tf.keras.Model):
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD','lmSAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
-        
+        elif self.config['optimizer'] in ['SAM_Metrics']:
+            loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
+
         else:
             print('Optimizer not recognised')
 
@@ -446,6 +451,157 @@ class FSAM(tf.keras.optimizers.Optimizer):
 
         return loss,y_hat
 
+class LookSAM(tf.keras.optimizers.Optimizer):
+    def __init__(self, base_optim, config, k=5, alpha=0.5, name="LookSAM", **kwargs):
+        super().__init__(name, **kwargs)
+        self.base_optim = base_optim
+        self.rho = config['rho']
+        self.k = k #update frequence of sharpness grad
+        self.k_current = 0
+        self.title = f"LookSAM"
+
+    def calc_g(self,x,y,model,loss_func):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        return tape.gradient(loss,model.trainable_variables)
+    
+    def calc_gs(self,x,y,g,model,loss_func):
+        grad_norm = tf.linalg.global_norm(g)
+        eps = [(g * self.rho)/ (grad_norm + 1e-12) for g in gs]
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+        angle = tf.tensordot(g,gs,axes=1)/(tf.norm(g)*tf.norm(gs))
+        gv = gs - tf.norm(gs)*tf.tensordot(angle, g/tf.norm(g),axes=1)
+
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+        return gs,gv
+
+    def step(self,x,y,model,loss_func):
+        g = calc_g(x,y,model,loss_func) #grad from current point
+        if self.k_current % self.k == 0:
+            g_s,self.g_v = calc_gs(x,y,g,model,loss_func) #calc the grad from advanced point
+        else:
+            g_s = g + alpha*(tf.norm(g)/tf.norm(self.g_v))*self.g_v
+        self.k_current += 1
+        self.base_optim.apply_gradients(zip(g_s,model.trainable_variables))
+            
+
+class SAM_Metrics(tf.keras.optimizers.Optimizer):
+    def __init__(self, record_its,base_optim, config, name="SAM_Metrics", **kwargs):
+        super().__init__(name, **kwargs)
+        self.record_its = record_its
+        self.its = tf.Variable(0,trainable=False)
+        self.base_optim = base_optim
+        self.rho = config['rho']
+        self.title = f"SAM_Metrics"
+        self.g_diff = tf.Variable(0.0,trainable=False)
+        self.g_s_diff = tf.Variable(0.0,trainable=False)
+        self.g_v_diff = tf.Variable(0.0,trainable=False)
+        self.old_g_flat = tf.Variable(tf.zeros((315722,)),trainable=False) #need a way to get model params
+        self.old_g_s_flat = tf.Variable(tf.zeros((315722,)),trainable=False)
+        self.old_g_v_flat = tf.Variable(tf.zeros((315722,)),trainable=False)
+    
+
+    @tf.function
+    def og_grad(self,model,x,y,loss_func):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        g = tape.gradient(loss, model.trainable_variables)
+        return g
+
+    @tf.function
+    def sam_grad(self,model,x,y,loss_func,g):
+        grad_norm = tf.linalg.global_norm(g)
+        eps = [(g_i * self.rho)/ (grad_norm + 1e-12) for g_i in g]
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        g_s = tape.gradient(loss, model.trainable_variables)
+
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+        return g_s,loss,y_hat
+
+    @tf.function
+    def v_grad(self,grad,g_sgrad):
+        g_flat = tf.concat([tf.reshape(v,[-1]) for v in grad],axis=0)
+        g_s_flat = tf.concat([tf.reshape(v,[-1]) for v in g_sgrad],axis=0)
+        angle = tf.tensordot(g_flat,g_s_flat,axes=1)/tf.norm(g_flat)*tf.norm(g_s_flat)
+        g_v_flat = g_s_flat - tf.norm(g_s_flat)*tf.tensordot(angle, g_flat/tf.norm(g_flat),axes=0)
+        return g_flat,g_s_flat,g_v_flat
+
+
+    @tf.function
+    def update_its(self):
+        self.its.assign_add(1)
+    
+    @tf.function
+    def new_vs_old_grads(self,g_flat,g_s_flat,g_v_flat):
+        self.g_diff.assign(tf.norm(self.old_g_flat - g_flat))
+        self.g_s_diff.assign(tf.norm(self.old_g_s_flat - g_s_flat))
+        self.g_v_diff.assign(tf.norm(self.old_g_v_flat - g_v_flat))
+
+
+    @tf.function
+    def buildoldgrads(self,g_flat,g_s_flat,g_v_flat):
+        self.old_g_flat.assign(g_flat)
+        self.old_g_s_flat.assign(g_s_flat)
+        self.old_g_v_flat.assign(g_v_flat)
+
+    
+    @tf.function
+    def step0(self,x,y,model,loss_func):
+        g = self.og_grad(model,x,y,loss_func)
+        g_s,loss,y_hat = self.sam_grad(model,x,y,loss_func,g)
+
+        g_flat,g_s_flat,g_v_flat = self.v_grad(g,g_s)
+
+        self.buildoldgrads(g_flat,g_s_flat,g_v_flat)
+        self.base_optim.apply_gradients(zip(g_s, model.trainable_variables))
+        self.update_its()
+        return loss,y_hat
+    @tf.function
+    def recordstep(self,x,y,model,loss_func):
+        g = self.og_grad(model,x,y,loss_func)
+        g_s,loss,y_hat = self.sam_grad(model,x,y,loss_func,g)
+
+        g_flat,g_s_flat,g_v_flat = self.v_grad(g,g_s)
+
+        self.new_vs_old_grads(g_flat,g_s_flat,g_v_flat)
+        self.buildoldgrads(g_flat,g_s_flat,g_v_flat)
+        self.base_optim.apply_gradients(zip(g_s, model.trainable_variables))
+        self.update_its()
+        return loss,y_hat
+
+    @tf.function
+    def choosestep(self,x,y,model,loss_func):
+        loss, y_hat = tf.cond(tf.math.floormod(self.its,self.record_its) == 0, lambda: self.recordstep(x,y,model,loss_func),lambda: self.norecordstep(x,y,model,loss_func))
+        return loss,y_hat
+
+    @tf.function
+    def norecordstep(self,x,y,model,loss_func):
+        g = self.og_grad(model,x,y,loss_func)
+        g_s,loss,y_hat = self.sam_grad(model,x,y,loss_func,g)
+        self.base_optim.apply_gradients(zip(g_s, model.trainable_variables))
+        self.update_its()
+        return loss,y_hat
+
+    def step(self,x,y,model,loss_func):
+        loss,y_hat = tf.cond(self.its == 0,lambda: self.step0(x,y,model,loss_func),lambda: self.choosestep(x,y,model,loss_func))
+        return loss,y_hat
+
+
+
+
 class LRMetric(tf.keras.metrics.Metric):
     def __init__(self, optimizer, name='LR', **kwargs):
         super().__init__(name=name, **kwargs)
@@ -464,6 +620,32 @@ class LRMetric(tf.keras.metrics.Metric):
 
     def result(self):
         return self.lr
+
+class SAMMetric(tf.keras.metrics.Metric):
+    def __init__(self, optimizer, name='SAMMetric', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.gdiff = self.add_variable(
+            shape=(),
+            initializer='zeros',
+            name='gdiff'
+        )
+        self.gsdiff = self.add_variable(
+            shape=(),
+            initializer='zeros',
+            name='gsdiff'
+        )
+        self.gvdiff = self.add_variable(
+            shape=(),
+            initializer='zeros',
+            name='gvdiff'
+        )
+        self.optimizer = optimizer
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        self.gdiff.assign(self.optimizer.g_diff)
+        self.gsdiff.assign(self.optimizer.g_s_diff)
+        self.gvdiff.assign(self.optimizer.g_v_diff)
+    def result(self):
+        return self.gdiff,self.gsdiff,self.gvdiff
 
 
 def fixed_lrschedule(epoch,lr,config):
@@ -497,6 +679,19 @@ def callback_selector(config):
                 tf.keras.backend.set_value(self.model.optimizer.lr, new_lr)
             wandb.log({'lr':new_lr},commit=False)
             tf.print('Learning Rate: ',new_lr)
+
+    class CustomSAMCallback(tf.keras.callbacks.Callback):
+        def __init__(self):
+            super().__init__()
+
+        def on_batch_end(self, batch, logs=None):
+            its = int(tf.keras.backend.get_value(self.model.optimizer.its))
+            record_its = int(self.model.optimizer.record_its)
+            if its % record_its == 0 and its != 0:
+                gdiff = float(tf.keras.backend.get_value(self.model.optimizer.g_diff))
+                gsdiff = float(tf.keras.backend.get_value(self.model.optimizer.g_s_diff))
+                gvdiff = float(tf.keras.backend.get_value(self.model.optimizer.g_v_diff))
+                wandb.log({'gdiff':gdiff,'gsdiff':gsdiff,'gvdiff':gvdiff},commit=True)
             
     #this defiens any callback for the fit function
     callbacks = []
@@ -507,6 +702,10 @@ def callback_selector(config):
     elif config['lr_decay_type'] == 'percentage_step_decay':
         lr_callback = CustomLRScheduler(percentage_step_decay_lrschedule,config)
         callbacks.append(lr_callback)
+
+    if config['optimizer'] == 'SAM_Metrics':
+        sam_callback = CustomSAMCallback()
+        callbacks.append(sam_callback)
     print('Callbacks: ',callbacks)
     
     return callbacks
@@ -1794,6 +1993,8 @@ def optimizer_selector(optimizer_name,config):
         optim= mSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'lmSAM_SGD':
         optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    elif optimizer_name == 'SAM_Metrics':
+        optim= SAM_Metrics(5,tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     else:
         print('Optimizer not recognised')
         return None

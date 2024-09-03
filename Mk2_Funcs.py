@@ -288,7 +288,7 @@ def calc_grad_alignment(ds,model,grad_bs,bs,limit=None,groups=None,upper_bounds=
     if groups == None:
         groups = 1
 
-    if upper_bounds == None:
+    if upper_bounds is None:
         #need to calc the upper bounds
         _,_,upper_bounds,_,_ = calc_train_loss_spectrum(ds,model,tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE),limit=limit,sort=True,save=False,groups=groups)
 
@@ -306,9 +306,12 @@ def calc_grad_alignment(ds,model,grad_bs,bs,limit=None,groups=None,upper_bounds=
         for (j_grad,j_loss) in zip(grads,losses):
             for g in range(groups):
                 if j_loss <= upper_bounds[g]:
-                    group_counts[g] += 1
-                    group_totals[g] += j_grad
-                    break
+                    if group_counts[g] < limit:
+                        group_counts[g] += 1
+                        group_totals[g] += j_grad
+                        break
+                    else:
+                        continue
         if np.all(group_counts >= limit):
             break
 
@@ -346,7 +349,7 @@ class CustomEOE(tf.keras.callbacks.Callback):
         self.ds = ds
         self.model = model
     def on_epoch_end(self, epoch, logs=None):
-        #Run FIM calculation
+
         if epoch % self.config['epoch_calc_freq'] == 0:
             #calc FIM and or loss spectrum
             if self.config['FIM_calc'] == True and self.config['Loss_spec_calc'] == True:
@@ -384,7 +387,10 @@ class CustomEOE(tf.keras.callbacks.Callback):
 
             #calc grad alignment
             if self.config['Grad_alignment_calc'] == True:
-                avg_cos,avg_norm,group_norms = calc_grad_alignment(self.ds,self.model,self.config['Grad_bs'],self.config['batch_size'],limit=self.config['FIM_limit'],groups=self.config['FIM_groups'])
+                if logLoss:
+                    avg_cos,avg_norm,group_norms = calc_grad_alignment(self.ds,self.model,self.config['Grad_bs'],self.config['batch_size'],limit=self.config['FIM_limit'],groups=self.config['FIM_groups'],upper_bounds=upper_bounds)
+                else:
+                    avg_cos,avg_norm,group_norms = calc_grad_alignment(self.ds,self.model,self.config['Grad_bs'],self.config['batch_size'],limit=self.config['FIM_limit'],groups=self.config['FIM_groups'])
                 wandb.log({'avg_norm':avg_norm},step=epoch)
                 for i in range(len(group_norms)):
                     wandb.log({'group_norm_'+str(i):group_norms[i]},step=epoch)
@@ -422,6 +428,7 @@ class CustomEOB(tf.keras.callbacks.Callback):
             self.num_batches = self.latest_batch
     def on_batch_end(self, batch, logs=None):
         self.latest_batch = batch
+        
 
         #Run FIM calculation and or loss spectrum calculation
         if batch % self.config['batch_calc_freq'] == 0 and self.epoch < self.config['batch_calc_epoch_limit']:
@@ -470,10 +477,10 @@ class CustomEOB(tf.keras.callbacks.Callback):
                 print('avg_norm: ',avg_norm)
                 print('group_norms: ',len(group_norms))
                 print('avg_cos: ',len(avg_cos))
-                wandb.log({'avg_norm':avg_norm},step=(self.epoch*self.num_batches)+batch)
+                wandb.log({'b_avg_norm':avg_norm},step=(self.epoch*self.num_batches)+batch)
                 for i in range(len(group_norms)):
-                    wandb.log({'group_norm_'+str(i):group_norms[i]},step=(self.epoch*self.num_batches)+batch)
-                    wandb.log({'avg_cos_'+str(i):avg_cos[i]},step=(self.epoch*self.num_batches)+batch)
+                    wandb.log({'b_group_norm_'+str(i):group_norms[i]},step=(self.epoch*self.num_batches)+batch)
+                    wandb.log({'b_avg_cos_'+str(i):avg_cos[i]},step=(self.epoch*self.num_batches)+batch)
 
             #log the results
             if logFIM:
