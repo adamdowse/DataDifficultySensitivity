@@ -39,6 +39,10 @@ class Model(tf.keras.Model):
 
     def compile(self,optimizer,loss,metrics=None):
         super().compile(optimizer=optimizer,loss=loss,metrics=metrics)
+        print('Compiling Model')
+        if hasattr(optimizer,'setup'):
+            print('Setting up optimizer')
+            self.optimizer.setup(self.model)
 
     def _log(items,step):
         wandb.log(items,step=step)
@@ -54,7 +58,7 @@ class Model(tf.keras.Model):
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD','lmSAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
-        elif self.config['optimizer'] in ['SAM_Metrics']:
+        elif self.config['optimizer'] in ['SAM_Metrics','FriendSAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
 
         else:
@@ -308,6 +312,7 @@ class lmSAM(tf.keras.optimizers.Optimizer):
             var.assign_sub(e)
         #model.trainable_variables = tf.map_fn(lambda var,eps: var - eps, (model.trainable_variables, self.eps))
         #apply normal gradient step
+
         self.base_optim.apply_gradients(zip(gs, model.trainable_variables))
 
     def step(self, x, y, model, loss_func):
@@ -317,6 +322,72 @@ class lmSAM(tf.keras.optimizers.Optimizer):
         self.rho = self.rho * self.rho_decay
         return loss,y_hat
 
+
+class FriendSAM(tf.keras.optimizers.Optimizer):
+    #mSAM uses a small amount of data than the batch to perform the maximisation step
+    def __init__(self, base_optim, config, name="lmSAM", **kwargs):
+        super().__init__(name, **kwargs)
+        self.base_optim = base_optim
+        self.rho = config['rho']  # ball size
+        self.rho_decay = config['rho_decay']
+        self.m = config['m']
+        self.title = f"lmSAM_SGD"
+        #currently only uses catcrossent
+        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
+        self.lam = 0.99
+        tf.print('in FriendSAM init')
+        
+    def setup(self,model):
+        self.m = [tf.Variable(tf.zeros_like(v),trainable=False) for v in model.trainable_variables]
+        tf.print('in FriendSAM setup')
+
+    @tf.function
+    def max_step(self,model,x,y,loss_func):
+        #compute grads at current point and move to the maximum in the ball
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = self.nored_loss(y,y_hat)
+            gloss = tf.reduce_mean(loss)#mean of all losses
+        gs = tape.gradient(gloss, model.trainable_variables)
+        grad_norm = tf.linalg.global_norm(gs)
+        eps = [(g * self.rho)/ (grad_norm + 1e-12) for g in gs]
+
+        for m,g in zip(self.m,gs):
+            m.assign(self.lam * m + (1-self.lam) * g)
+        #self.m = [self.lam * m + (1-self.lam) * g for m,g in zip(self.m,gs)]
+
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+        #print('EPS: ',[e.shape for e in self.eps])
+        #print('Model Trainable Variables: ',[e.shape for e in model.trainable_variables])
+
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var + eps, (model.trainable_variables, self.eps))
+        return gloss,y_hat,eps
+    
+    @tf.function
+    def min_step(self,model,x,y,loss_func,eps):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+        #move back to the original point
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var - eps, (model.trainable_variables, self.eps))
+        #calc the batch noise component of the gradient
+        gs_flat = tf.concat([tf.reshape(v,[-1]) for v in gs],axis=0)
+        m_flat = tf.concat([tf.reshape(v,[-1]) for v in self.m],axis=0)
+        angle = tf.tensordot(gs_flat,m_flat,axes=1)/(tf.norm(gs_flat)*tf.norm(m_flat))
+        noise = [gb - angle * gf for gb,gf in zip(gs,self.m)]
+
+        self.base_optim.apply_gradients(zip(noise, model.trainable_variables))
+
+    def step(self, x, y, model, loss_func):
+        #compute the max step
+        loss,y_hat,eps = self.max_step(model,x,y,loss_func)
+        self.min_step(model,x,y,loss_func,eps)
+        self.rho = self.rho * self.rho_decay
+        return loss,y_hat
 
 class ASAM(tf.keras.optimizers.Optimizer):
     #Adaptive SAM
@@ -334,7 +405,7 @@ class ASAM(tf.keras.optimizers.Optimizer):
             y_hat = model(x,training=True)
             loss = loss_func(y,y_hat)
         gs = tape.gradient(loss, model.trainable_variables)
-        tf.print('Gradients: ',[e for e in gs])
+        #tf.print('Gradients: ',[e for e in gs])
         #flatten model weights
         #flat_weights = tf.concat([tf.reshape(v,[-1]) for v in model.trainable_variables],axis=0)
         t_w = [tf.math.abs(l) for l in model.trainable_variables]
@@ -500,13 +571,33 @@ class SAM_Metrics(tf.keras.optimizers.Optimizer):
         self.base_optim = base_optim
         self.rho = config['rho']
         self.title = f"SAM_Metrics"
+        self.bs = config['batch_size']
         self.g_diff = tf.Variable(0.0,trainable=False)
         self.g_s_diff = tf.Variable(0.0,trainable=False)
         self.g_v_diff = tf.Variable(0.0,trainable=False)
-        self.old_g_flat = tf.Variable(tf.zeros((315722,)),trainable=False) #need a way to get model params
-        self.old_g_s_flat = tf.Variable(tf.zeros((315722,)),trainable=False)
-        self.old_g_v_flat = tf.Variable(tf.zeros((315722,)),trainable=False)
+        self.angles = tf.Variable(tf.zeros((config['batch_size'],)),trainable=False)
+        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
+        #self.old_g_flat = tf.Variable(tf.zeros((315722,)),trainable=False) #need a way to get model params
+        #self.old_g_s_flat = tf.Variable(tf.zeros((315722,)),trainable=False)
+        #self.old_g_v_flat = tf.Variable(tf.zeros((315722,)),trainable=False)
     
+    def setup(self,model):
+        p = [tf.reshape(v,[-1]) for v in model.trainable_variables]
+        p = tf.concat(p,axis=0)
+        self.old_g_flat = tf.Variable(tf.zeros((p.shape[0],)),trainable=False)
+        self.old_g_s_flat = tf.Variable(tf.zeros((p.shape[0],)),trainable=False)
+        self.old_g_v_flat = tf.Variable(tf.zeros((p.shape[0],)),trainable=False)
+
+    @tf.function
+    def cos_sim(self,x,y,g,loss_func,model):
+        #x is single data point
+        #g is the mean gradient
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        item_g = tape.gradient(loss, model.trainable_variables)
+        item_g = tf.concat([tf.reshape(v,[-1]) for v in item_g],axis=0)
+        return tf.tensordot(g,item_g,axes=1)/(tf.norm(g)*tf.norm(item_g))
 
     @tf.function
     def og_grad(self,model,x,y,loss_func):
@@ -514,7 +605,19 @@ class SAM_Metrics(tf.keras.optimizers.Optimizer):
             y_hat = model(x,training=True)
             loss = loss_func(y,y_hat)
         g = tape.gradient(loss, model.trainable_variables)
+
+        #print('g: ',[e.shape for e in g])
+        g_flat = tf.concat([tf.reshape(v,[-1]) for v in g],axis=0) #flat avg grad
+
+        for i in tf.range(self.bs):
+            angle = self.cos_sim(tf.expand_dims(x[i],axis=0),tf.expand_dims(y[i],axis=0),g_flat,loss_func,model)
+            self.angles[i].assign(angle)
+        
+    
+        #return the angle between the mean gradient and the batch gradient
         return g
+
+
 
     @tf.function
     def sam_grad(self,model,x,y,loss_func,g):
@@ -1995,6 +2098,8 @@ def optimizer_selector(optimizer_name,config):
         optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'SAM_Metrics':
         optim= SAM_Metrics(5,tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    elif optimizer_name == 'FriendSAM_SGD':
+        optim= FriendSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     else:
         print('Optimizer not recognised')
         return None

@@ -78,7 +78,7 @@ if __name__ == '__main__':
                 'optimizer':args.o,
                 'momentum':0.9,
                 'dropout':0.0,
-                'lr':0.001,
+                'lr':0.01,
                 'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
                 'lr_decay_type':'fixed', #fixed, exp_decay, percentage_step_decay
                 'batch_size':128,
