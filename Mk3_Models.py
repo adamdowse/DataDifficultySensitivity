@@ -58,7 +58,7 @@ class Model(tf.keras.Model):
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD','lmSAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
-        elif self.config['optimizer'] in ['SAM_Metrics','FriendSAM_SGD']:
+        elif self.config['optimizer'] in ['SAM_Metrics','FriendSAM_SGD','angleSAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
 
         else:
@@ -220,51 +220,77 @@ class mSAM(tf.keras.optimizers.Optimizer):
         self.base_optim = base_optim
         self.rho = config['rho']  # ball size
         self.rho_decay = config['rho_decay']
-        self.m = config['m']
+        self.m_max = tf.constant(config['m'],dtype=tf.float32)
+        self.m = tf.Variable(1,trainable=False,dtype=tf.int32)
+        self.it = tf.Variable(0,trainable=False)
+        self.bs = tf.constant(config['batch_size'])
         self.title = f"mSAM_SGD"
         self.nored_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
         
+    def setup(self,model):
+        self.group_size = tf.constant(tf.cast(self.bs/self.m,tf.int32),dtype=tf.int32)#group size
+        self.count = tf.Variable(0,trainable=False)
+        self.accu_grads = [tf.Variable(tf.zeros_like(v),trainable=False,dtype=tf.float32) for v in model.trainable_variables]
+
+
 
     @tf.function
-    def max_step(self,model,x,y,loss_func):
+    def get_minimisation_grad(self,model,x,y,loss_func):
         #compute grads at current point and move to the maximum in the ball
-        #reduce the batch size to m
         with tf.GradientTape() as tape:
             y_hat = model(x,training=True)
             loss = self.nored_loss(y,y_hat)
-            index = tf.random.uniform([self.m],0,tf.shape(x)[0],dtype=tf.int32)
-            loss = tf.gather(loss,index)
             loss = tf.reduce_mean(loss)#mean the losses
         gs = tape.gradient(loss, model.trainable_variables)
         grad_norm = tf.linalg.global_norm(gs)
         eps = [(g * self.rho)/ (grad_norm + 1e-12) for g in gs]
-
+        
         for e, var in zip(eps, model.trainable_variables):
             var.assign_add(e)
-        #print('EPS: ',[e.shape for e in self.eps])
-        #print('Model Trainable Variables: ',[e.shape for e in model.trainable_variables])
 
-        #model.trainable_variables = tf.map_fn(lambda var,eps: var + eps, (model.trainable_variables, self.eps))
-        return loss,y_hat,eps
-    
-    @tf.function
-    def min_step(self,model,x,y,loss_func,eps):
         with tf.GradientTape() as tape:
             y_hat = model(x,training=True)
             loss = loss_func(y,y_hat)
         gs = tape.gradient(loss, model.trainable_variables)
+
         #move back to the original point
         for e, var in zip(eps, model.trainable_variables):
             var.assign_sub(e)
-        #model.trainable_variables = tf.map_fn(lambda var,eps: var - eps, (model.trainable_variables, self.eps))
-        #apply normal gradient step
-        self.base_optim.apply_gradients(zip(gs, model.trainable_variables))
+
+        self.accu_grads = [l.assign_add(g) for l,g in zip(self.accu_grads,gs)]
+        self.count.assign_add(1)
+    
+    def get_shape(self,x):
+        return tf.shape(x)
 
     def step(self, x, y, model, loss_func):
-        #compute the max step
-        loss,y_hat,eps = self.max_step(model,x,y,loss_func)
-        self.min_step(model,x,y,loss_func,eps)
-        self.rho = self.rho * self.rho_decay
+        self.accu_grads = [l.assign(tf.zeros_like(l)) for l in self.accu_grads] #reset accumilated grad to 0
+        self.count.assign(0)
+
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = self.nored_loss(y,y_hat)
+            loss = tf.reduce_mean(loss)
+
+        if self.m > 1:
+            for i in tf.range(self.m-1):
+                self.get_minimisation_grad(model,x[i*self.group_size:(i+1)*self.group_size],y[i*self.group_size:(i+1)*self.group_size],loss_func)
+            self.get_minimisation_grad(model,x[(i+1)*self.group_size:],y[(i+1)*self.group_size:],loss_func)
+        else:
+            self.get_minimisation_grad(model,x,y,loss_func)
+
+        #average the accumulated grads
+        self.accu_grads = [l.assign(tf.math.divide(l,tf.cast(self.count,dtype=tf.float32))) for l in self.accu_grads]
+        #apply normal gradient step
+        self.base_optim.apply_gradients(zip(self.accu_grads, model.trainable_variables))
+
+        if tf.cast(self.it,dtype=tf.float32) > (7820.0/2.0):
+            self.m.assign(tf.cast(self.m_max,dtype=tf.int32))
+            self.it.assign(0)
+            tf.print('m: ',self.m)
+        else:
+            self.it.assign_add(1)
+
         return loss,y_hat
 
 class lmSAM(tf.keras.optimizers.Optimizer):
@@ -561,7 +587,93 @@ class LookSAM(tf.keras.optimizers.Optimizer):
             g_s = g + alpha*(tf.norm(g)/tf.norm(self.g_v))*self.g_v
         self.k_current += 1
         self.base_optim.apply_gradients(zip(g_s,model.trainable_variables))
-            
+
+class angleSAM(tf.keras.optimizers.Optimizer):
+    def __init__(self, base_optim, config, name="angleSAM", **kwargs):
+        super().__init__(name, **kwargs)
+        self.base_optim = base_optim
+        self.rho = config['rho']
+        self.title = f"angleSAM"
+        self.bs = tf.constant(config['batch_size'])
+        self.angles = tf.Variable(tf.zeros((self.bs,)),trainable=False)
+        self.gradcount = tf.Variable(0,trainable=False, dtype=tf.float32)
+
+    def setup(self,model):
+        self.accgrad = [tf.Variable(tf.zeros_like(v),trainable=False) for v in model.trainable_variables]
+        
+
+    def tf_shape(self,x):
+        return tf.shape(x)
+    
+    @tf.function
+    def cos_sim(self,x,y,g,loss_func,model):
+        #x is single data point
+        #g is the mean gradient
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        item_g = tape.gradient(loss, model.trainable_variables)
+        fitem_g = tf.concat([tf.reshape(v,[-1]) for v in item_g],axis=0)
+        angle = tf.tensordot(g,fitem_g,axes=1)/(tf.norm(g)*tf.norm(fitem_g))
+
+        if angle > 0:
+            i = 0
+            for l in self.accgrad:
+                l.assign_add(item_g[i])
+                i += 1
+            self.gradcount.assign_add(1)
+
+    @tf.function
+    def max_step(self,model,x,y,loss_func):
+        #compute grads at current point and move to the maximum in the ball
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+        g_flat = tf.concat([tf.reshape(v,[-1]) for v in gs],axis=0) #flat avg grad
+
+        self.gradcount.assign(0)
+        self.accgrad = [l.assign(tf.zeros_like(l)) for l in self.accgrad] #reset accumilated grad to 0
+        for i in tf.range(self.tf_shape(x)[0]):
+            self.cos_sim(tf.expand_dims(x[i],axis=0),tf.expand_dims(y[i],axis=0),g_flat,loss_func,model)
+        
+        #average the accumulated grads
+        for l in self.accgrad:
+            l.assign(tf.math.divide(l,self.gradcount))
+    
+
+        grad_norm = tf.linalg.global_norm(self.accgrad)
+        eps = [(g * self.rho)/ (grad_norm + 1e-12) for g in self.accgrad]
+
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+        #print('EPS: ',[e.shape for e in self.eps])
+        #print('Model Trainable Variables: ',[e.shape for e in model.trainable_variables])
+
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var + eps, (model.trainable_variables, self.eps))
+        return loss,y_hat,eps
+    
+    @tf.function
+    def min_step(self,model,x,y,loss_func,eps):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+        #move back to the original point
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+        #model.trainable_variables = tf.map_fn(lambda var,eps: var - eps, (model.trainable_variables, self.eps))
+        #apply normal gradient step
+        self.base_optim.apply_gradients(zip(gs, model.trainable_variables))
+        #tf.print(self.base_optim.lr)
+
+    def step(self, x, y, model, loss_func):
+        #compute the max step
+        loss,y_hat,eps = self.max_step(model,x,y,loss_func)
+        self.min_step(model,x,y,loss_func,eps)
+        return loss,y_hat
+
+    
 
 class SAM_Metrics(tf.keras.optimizers.Optimizer):
     def __init__(self, record_its,base_optim, config, name="SAM_Metrics", **kwargs):
@@ -571,7 +683,7 @@ class SAM_Metrics(tf.keras.optimizers.Optimizer):
         self.base_optim = base_optim
         self.rho = config['rho']
         self.title = f"SAM_Metrics"
-        self.bs = config['batch_size']
+        self.bs = tf.constant(config['batch_size'])
         self.g_diff = tf.Variable(0.0,trainable=False)
         self.g_s_diff = tf.Variable(0.0,trainable=False)
         self.g_v_diff = tf.Variable(0.0,trainable=False)
@@ -587,6 +699,9 @@ class SAM_Metrics(tf.keras.optimizers.Optimizer):
         self.old_g_flat = tf.Variable(tf.zeros((p.shape[0],)),trainable=False)
         self.old_g_s_flat = tf.Variable(tf.zeros((p.shape[0],)),trainable=False)
         self.old_g_v_flat = tf.Variable(tf.zeros((p.shape[0],)),trainable=False)
+
+    def tf_shape(self,x):
+        return tf.shape(x)
 
     @tf.function
     def cos_sim(self,x,y,g,loss_func,model):
@@ -609,9 +724,11 @@ class SAM_Metrics(tf.keras.optimizers.Optimizer):
         #print('g: ',[e.shape for e in g])
         g_flat = tf.concat([tf.reshape(v,[-1]) for v in g],axis=0) #flat avg grad
 
-        for i in tf.range(self.bs):
-            angle = self.cos_sim(tf.expand_dims(x[i],axis=0),tf.expand_dims(y[i],axis=0),g_flat,loss_func,model)
-            self.angles[i].assign(angle)
+        s = self.tf_shape(x)[0]
+        if s == self.bs:
+            for i in tf.range(self.bs):
+                angle = self.cos_sim(tf.expand_dims(x[i],axis=0),tf.expand_dims(y[i],axis=0),g_flat,loss_func,model)
+                self.angles[i].assign(angle)
         
     
         #return the angle between the mean gradient and the batch gradient
@@ -795,6 +912,8 @@ def callback_selector(config):
                 gsdiff = float(tf.keras.backend.get_value(self.model.optimizer.g_s_diff))
                 gvdiff = float(tf.keras.backend.get_value(self.model.optimizer.g_v_diff))
                 wandb.log({'gdiff':gdiff,'gsdiff':gsdiff,'gvdiff':gvdiff},commit=True)
+                angles = tf.keras.backend.get_value(self.model.optimizer.angles)
+                wandb.log({'angles':angles},commit=True)
             
     #this defiens any callback for the fit function
     callbacks = []
@@ -2100,6 +2219,8 @@ def optimizer_selector(optimizer_name,config):
         optim= SAM_Metrics(5,tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'FriendSAM_SGD':
         optim= FriendSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    elif optimizer_name == 'angleSAM_SGD':
+        optim= angleSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     else:
         print('Optimizer not recognised')
         return None
