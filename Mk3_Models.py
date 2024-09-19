@@ -879,6 +879,13 @@ def percentage_step_decay_lrschedule(epoch,lr,config):
         lr = lr * config['lr_decay_params']['lr_decay_rate']
     return lr
 
+def cosine_decay_lrschedule(step,lr,config):
+    step = min(step,config['lr_decay_params']['decay_steps'])
+    cosine_decay = 0.5 * (1 +tf.math.cos(np.pi * step / config['lr_decay_params']['decay_steps']))
+    decayed = (1 - config['lr_decay_params']['alpha']) * cosine_decay + config['lr_decay_params']['alpha']
+    return config['lr_decay_params']['initial_learning_rate'] * decayed
+
+
 def callback_selector(config):
     class CustomLRScheduler(tf.keras.callbacks.Callback):
         #sets the LR for the model
@@ -886,19 +893,40 @@ def callback_selector(config):
             super().__init__()
             self.lr_schedule = lr_schedule
             self.config = config
-        def on_epoch_begin(self, epoch, logs=None):
-            #check if the optimzer has a base_optim attribute
-            if hasattr(self.model.optimizer, 'base_optim'):
-                lr = float(tf.keras.backend.get_value(self.model.optimizer.base_optim.lr))
-                new_lr = self.lr_schedule(epoch,lr,self.config)
-                tf.keras.backend.set_value(self.model.optimizer.base_optim.lr, new_lr)
+            self.local_lr = 0
 
-            else:
-                lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
-                new_lr = self.lr_schedule(epoch,lr,self.config)
-                tf.keras.backend.set_value(self.model.optimizer.lr, new_lr)
-            wandb.log({'lr':new_lr},commit=False)
-            tf.print('Learning Rate: ',new_lr)
+        def on_batch_begin(self, batch, logs=None):
+            if self.config['lr_decay_type'] in ['cosine_decay']:
+                #check if the optimzer has a base_optim attribute
+                if hasattr(self.model.optimizer, 'base_optim'):
+                    lr = float(tf.keras.backend.get_value(self.model.optimizer.base_optim.lr))
+                    new_lr = self.lr_schedule(batch,lr,self.config)
+                    self.local_lr = new_lr
+                    tf.keras.backend.set_value(self.model.optimizer.base_optim.lr, new_lr)
+
+                else:
+                    lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
+                    new_lr = self.lr_schedule(batch,lr,self.config)
+                    self.local_lr = new_lr
+                    tf.keras.backend.set_value(self.model.optimizer.lr, new_lr)
+                
+        
+        def on_epoch_begin(self, epoch, logs=None):
+            if self.config['lr_decay_type'] in ['fixed','percentage_step_decay']:
+                #check if the optimzer has a base_optim attribute
+                if hasattr(self.model.optimizer, 'base_optim'):
+                    lr = float(tf.keras.backend.get_value(self.model.optimizer.base_optim.lr))
+                    new_lr = self.lr_schedule(epoch,lr,self.config)
+                    self.local_lr = new_lr
+                    tf.keras.backend.set_value(self.model.optimizer.base_optim.lr, new_lr)
+
+                else:
+                    lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
+                    new_lr = self.lr_schedule(epoch,lr,self.config)
+                    self.local_lr = new_lr
+                    tf.keras.backend.set_value(self.model.optimizer.lr, new_lr)
+            wandb.log({'lr':self.local_lr},commit=False)
+            tf.print('Learning Rate: ',self.local_lr)
 
     class CustomSAMCallback(tf.keras.callbacks.Callback):
         def __init__(self):
@@ -1240,9 +1268,7 @@ def model_selector(model_name,config):
             out = self.flatten(out)
             out = self.dense(out)
             return out
-
-
-                
+            
     class WideBasic(tf.keras.layers.Layer):
         def __init__(self,in_planes,planes,stride,droprate,REG=0.0):
             super(WideBasic,self).__init__()
@@ -1369,7 +1395,6 @@ def model_selector(model_name,config):
             out = self.flat(out)
             out = self.linear(out)
             return out
-
 
     class SoftAttention(tf.keras.layers.Layer):
         def __init__(self,ch,m,concat_with_x=False,aggregate=False,**kwargs):
@@ -1873,10 +1898,6 @@ def model_selector(model_name,config):
         model = CifarResNet(10,n=9,REG=config['weight_reg'],filters=[64,128,256],bottleneck=True)
         model.build(input_shape=(None,32,32,3))
         output_is_logits = False
-
-
-
-
 
     elif config['model_name'] == "PA_ResNet18":
         #this is a [64,128,256,512] resnet18 with preactivations

@@ -70,7 +70,7 @@ if __name__ == '__main__':
     print('r: ',args.r)
     print('o: ',args.o)
 
-    config = {'group':'LookSAM',
+    config = {'group':'SAMReview',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.9,0.1,0],
@@ -78,22 +78,22 @@ if __name__ == '__main__':
                 'optimizer':args.o,
                 'momentum':0.9,
                 'dropout':0.0,
-                'lr':0.01,
-                'lr_decay_params': {'lr_decay_rate':0.1,'lr_decay_epochs_percent':[0.5,0.75]},
-                'lr_decay_type':'fixed', #fixed, exp_decay, percentage_step_decay
+                'lr':0.1,
+                'lr_decay_params': {'alpha':0.00001,'decay_steps':150*391},
+                'lr_decay_type':'cosine_decay', #fixed, exp_decay, percentage_step_decay,cosine_decay
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'CNN',
+                'model_name':'CifarResNet56',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
                 'rho':args.r, # radius of ball 
                 'rho_decay':1, # 1 = no decay
                 'm':args.m, # must be less than batch size
-                'augs': {"normalise":'resnet50'}, #{'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
-                'weight_reg':0.0,
-                'epochs': 40,
+                'augs': {"normalise":'resnet50','flip':'horizontal','crop':4}, #{'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
+                'weight_reg':0.0005,
+                'epochs': 200,
 
                 'batch_calc_epoch_limit':1, #limit for using batch calcs and logging, if None or 0 then recording is off
                 'batch_calc_freq':1,
