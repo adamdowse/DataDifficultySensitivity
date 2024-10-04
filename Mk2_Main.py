@@ -70,7 +70,7 @@ if __name__ == '__main__':
     print('r: ',args.r)
     print('o: ',args.o)
 
-    config = {'group':'SAMReview',
+    config = {'group':'NormSGD',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.9,0.1,0],
@@ -78,13 +78,13 @@ if __name__ == '__main__':
                 'optimizer':args.o,
                 'momentum':0.9,
                 'dropout':0.0,
-                'lr':0.1,
+                'lr':0.001,
                 'lr_decay_params': {'alpha':0.00001,'decay_steps':150*391},
                 'lr_decay_type':'cosine_decay', #fixed, exp_decay, percentage_step_decay,cosine_decay
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
-                'model_name':'CifarResNet56',
+                'model_name':'CNN',
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
@@ -106,5 +106,5 @@ if __name__ == '__main__':
                 'Grad_alignment_calc':False,
                 'Grad_bs':5,
                 }
-    wandb.init(project="LookSAM",config=config)
+    wandb.init(project="NormSGD",config=config)
     main(config)

@@ -56,13 +56,14 @@ class Model(tf.keras.Model):
                 loss = self.compiled_loss(y, y_hat)
             gradients = tape.gradient(loss, self.model.trainable_variables)
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-        elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD','lmSAM_SGD']:
+        elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD','lmSAM_SGD','lmSAM1_SGD','lmSAM2_SGD','NormSGD','CustomSGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
         elif self.config['optimizer'] in ['SAM_Metrics','FriendSAM_SGD','angleSAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
 
         else:
             print('Optimizer not recognised')
+
 
         #update metrics
         for metric in self.metrics_list:
@@ -163,7 +164,7 @@ def build_model(config):
 
     model = Model(selected_model,config,output_is_logits)
     model.compile(optimizer=optimizer, loss=loss_func, metrics=metrics)
-    callbacks = callback_selector(config)
+    callbacks = callback_selector(config,model)
     return model, callbacks
 
 class SAM(tf.keras.optimizers.Optimizer):
@@ -293,7 +294,182 @@ class mSAM(tf.keras.optimizers.Optimizer):
 
         return loss,y_hat
 
-class lmSAM(tf.keras.optimizers.Optimizer):
+class lmSAM1(tf.keras.optimizers.Optimizer):
+    #mSAM uses micro batching to perform the maximisation step mico batch first then cul to highest losses in microbatch
+    def __init__(self, base_optim, config, name="mSAM", **kwargs):
+        super().__init__(name, **kwargs)
+        self.base_optim = base_optim
+        self.rho = config['rho']  # ball size
+        self.rho_decay = config['rho_decay']
+        self.m_max = tf.constant(config['m'],dtype=tf.float32)
+        self.m = tf.Variable(1,trainable=False,dtype=tf.int32)
+        self.it = tf.Variable(0,trainable=False)
+        self.bs = tf.constant(config['batch_size'])
+        self.cul_percent = tf.constant(0.5,dtype=tf.float32)
+        self.title = f"mSAM_SGD"
+        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
+        
+        
+    def setup(self,model):
+        self.group_size = tf.constant(tf.cast(self.bs/self.m,tf.int32),dtype=tf.int32)#group size
+        self.count = tf.Variable(0,trainable=False)
+        self.accu_grads = [tf.Variable(tf.zeros_like(v),trainable=False,dtype=tf.float32) for v in model.trainable_variables]
+
+
+
+    @tf.function
+    def get_minimisation_grad(self,model,x,y,loss_func):
+        #compute grads at current point and move to the maximum in the ball
+        #tf.print(tf.cast(tf.cast(self.m,tf.float32)*self.cul_percent,tf.int32))
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            redloss = self.nored_loss(y,y_hat)
+            redloss = tf.math.top_k(redloss, tf.cast(tf.cast(self.m,tf.float32)*self.cul_percent,tf.int32)).values
+            loss = tf.reduce_mean(redloss)#mean the losses
+        gs = tape.gradient(loss, model.trainable_variables)
+        grad_norm = tf.linalg.global_norm(gs)
+        eps = [(g * self.rho)/ (grad_norm + 1e-12) for g in gs]
+        
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+
+        #move back to the original point
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+
+        self.accu_grads = [l.assign_add(g) for l,g in zip(self.accu_grads,gs)]
+        self.count.assign_add(1)
+    
+    def get_shape(self,x):
+        return tf.shape(x)
+
+    def step(self, x, y, model, loss_func):
+        self.accu_grads = [l.assign(tf.zeros_like(l)) for l in self.accu_grads] #reset accumilated grad to 0
+        self.count.assign(0)
+
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            aloss = self.nored_loss(y,y_hat)
+            loss = tf.reduce_mean(aloss)
+        
+        #lmSAM can either be done by picking highest losses from microbatches
+        # or by first picking highest losses and then microbatching
+
+        if self.m > 1:
+            for i in tf.range(self.m-1):
+                self.get_minimisation_grad(model,x[i*self.group_size:(i+1)*self.group_size],y[i*self.group_size:(i+1)*self.group_size],loss_func)
+            self.get_minimisation_grad(model,x[(i+1)*self.group_size:],y[(i+1)*self.group_size:],loss_func)
+        else:
+            self.get_minimisation_grad(model,x,y,loss_func)
+
+        #average the accumulated grads
+        #might be able to do some stats here
+        self.accu_grads = [l.assign(tf.math.divide(l,tf.cast(self.count,dtype=tf.float32))) for l in self.accu_grads]
+        #apply normal gradient step
+        self.base_optim.apply_gradients(zip(self.accu_grads, model.trainable_variables))
+
+        if tf.cast(self.it,dtype=tf.float32) > (7820.0/2.0):
+            self.m.assign(tf.cast(self.m_max,dtype=tf.int32))
+            self.it.assign(0)
+            tf.print('m: ',self.m)
+        else:
+            self.it.assign_add(1)
+
+        return loss,y_hat
+
+class lmSAM2(tf.keras.optimizers.Optimizer):
+    #mSAM uses micro batching to perform the maximisation step mico batch first then cul to highest losses in microbatch
+    def __init__(self, base_optim, config, name="mSAM", **kwargs):
+        super().__init__(name, **kwargs)
+        self.base_optim = base_optim
+        self.rho = config['rho']  # ball size
+        self.rho_decay = config['rho_decay']
+        self.m_max = tf.constant(config['m'],dtype=tf.float32)
+        self.m = tf.Variable(1,trainable=False,dtype=tf.int32)
+        self.it = tf.Variable(0,trainable=False)
+        self.bs = tf.constant(config['batch_size'])
+        self.cul_percent = tf.constant(0.5,dtype=tf.float32)
+        self.title = f"mSAM_SGD"
+        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
+        
+        
+    def setup(self,model):
+        self.group_size = tf.constant(tf.cast(self.bs/self.m,tf.int32),dtype=tf.int32)#group size
+        self.count = tf.Variable(0,trainable=False)
+        self.accu_grads = [tf.Variable(tf.zeros_like(v),trainable=False,dtype=tf.float32) for v in model.trainable_variables]
+
+
+
+    @tf.function
+    def get_minimisation_grad(self,model,x,y,loss_func):
+        #compute grads at current point and move to the maximum in the ball
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            redloss = self.nored_loss(y,y_hat)
+            redloss = tf.math.top_k(loss, tf.cast(self.m*self.cul_percent,tf.int32)).values
+            loss = tf.reduce_mean(redloss)#mean the losses
+        gs = tape.gradient(loss, model.trainable_variables)
+        grad_norm = tf.linalg.global_norm(gs)
+        eps = [(g * self.rho)/ (grad_norm + 1e-12) for g in gs]
+        
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_add(e)
+
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        gs = tape.gradient(loss, model.trainable_variables)
+
+        #move back to the original point
+        for e, var in zip(eps, model.trainable_variables):
+            var.assign_sub(e)
+
+        self.accu_grads = [l.assign_add(g) for l,g in zip(self.accu_grads,gs)]
+        self.count.assign_add(1)
+    
+    def get_shape(self,x):
+        return tf.shape(x)
+
+    def step(self, x, y, model, loss_func):
+        self.accu_grads = [l.assign(tf.zeros_like(l)) for l in self.accu_grads] #reset accumilated grad to 0
+        self.count.assign(0)
+
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            aloss = self.nored_loss(y,y_hat)
+            loss = tf.reduce_mean(aloss)
+        
+        #lmSAM can either be done by picking highest losses from microbatches
+        # or by first picking highest losses and then microbatching
+
+        if self.m > 1:
+            for i in tf.range(self.m-1):
+                self.get_minimisation_grad(model,x[i*self.group_size:(i+1)*self.group_size],y[i*self.group_size:(i+1)*self.group_size],loss_func)
+            self.get_minimisation_grad(model,x[(i+1)*self.group_size:],y[(i+1)*self.group_size:],loss_func)
+        else:
+            self.get_minimisation_grad(model,x,y,loss_func)
+
+        #average the accumulated grads
+        #might be able to do some stats here
+        self.accu_grads = [l.assign(tf.math.divide(l,tf.cast(self.count,dtype=tf.float32))) for l in self.accu_grads]
+        #apply normal gradient step
+        self.base_optim.apply_gradients(zip(self.accu_grads, model.trainable_variables))
+
+        if tf.cast(self.it,dtype=tf.float32) > (7820.0/2.0):
+            self.m.assign(tf.cast(self.m_max,dtype=tf.int32))
+            self.it.assign(0)
+            tf.print('m: ',self.m)
+        else:
+            self.it.assign_add(1)
+
+        return loss,y_hat
+
+class oldlmSAM(tf.keras.optimizers.Optimizer):
     #mSAM uses a small amount of data than the batch to perform the maximisation step
     def __init__(self, base_optim, config, name="lmSAM", **kwargs):
         super().__init__(name, **kwargs)
@@ -347,6 +523,105 @@ class lmSAM(tf.keras.optimizers.Optimizer):
         self.min_step(model,x,y,loss_func,eps)
         self.rho = self.rho * self.rho_decay
         return loss,y_hat
+
+class NormSGD(tf.keras.optimizers.Optimizer):
+    #normalise each gradient in the batch such that higher loss does not have more power over low loss data.
+    def __init__(self,base_optim,config,name="NormSGD",**kwargs):
+        super().__init__(name,**kwargs)
+        self.base_optim = base_optim
+        self.nored_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
+        self.scale = 0.5
+        self.norm = tf.Variable(0.0)
+
+    def tf_shape(self,x):
+        return tf.shape(x)
+
+    def reduce_mult(self,x):
+            y = 0
+            j =0
+            for xi in x:
+                if j == 0:
+                    y = xi
+                    j+=1
+                else:
+                    y = y*xi
+            return y
+
+    def individual_step(self,x1,y1,model,loss_func):
+        #return the normalised gradent of each item in the batch
+        x1 = tf.expand_dims(x1,axis=0)
+        y1 = tf.expand_dims(y1,axis=0)
+        with tf.GradientTape() as tape:
+            y_hat = model(x1,training=True)
+            loss = loss_func(y1,y_hat)
+        g = tape.gradient(loss,model.trainable_variables) #get all the gradients for the item from the batch
+        g = [tf.reshape(l,[-1]) for l in g] #reshape the gradient to [num_layer_params x layers]
+        g = tf.concat(g,axis=0) #concat the gradient over the layers [num_params]
+
+        #calc the norm size of each grad and the norm direction
+        g_normalise,g_norm = tf.linalg.normalize(g)
+        return g_normalise,g_norm, loss,y_hat
+
+        
+
+    def step(self, x, y, model, loss_func):
+        #get grad of each item in batch
+        c = 0.0
+        g,g_norm,loss,y_hat = self.individual_step(x[0],y[0],model,loss_func)
+        for i in range(self.tf_shape(x)[0]):
+            if i == 0:
+                pass
+            else:
+                tg,tgn,tl,tyh = self.individual_step(x[i],y[i],model,loss_func)
+                g = g+tg
+                g_norm = g_norm + tgn
+                loss = loss + tl
+                y_hat = y_hat + tyh
+            c+=1.0
+        
+        #avg the batch normalised grads
+        g = g/c
+        g_norm = g_norm/c
+        loss = loss/c
+        y_hat = y_hat/c
+        self.norm.assign(tf.squeeze(g_norm))
+
+        #scale by the average norm
+        g = g *g_norm
+
+
+        #reshape to wights shape
+        layer_shapes = [v.shape for v in model.trainable_variables]
+        reshaped = [tf.zeros_like(v.shape) for v in model.trainable_variables]
+        i = 0
+        c = 0
+        for ls in layer_shapes:
+            reshaped[i] = tf.reshape(g[c:c+self.reduce_mult(ls)],ls)
+            c += self.reduce_mult(ls)
+            i += 1
+
+        self.base_optim.apply_gradients(zip(reshaped,model.trainable_variables))
+
+        return loss, y_hat
+
+class CustomSGD(tf.keras.optimizers.Optimizer):
+    def __init__(self,base_optim,config,name="CustomSGD",**kwargs):
+        super().__init__(name,**kwargs)
+        self.norm = tf.Variable(0.0)
+        self.base_optim = base_optim
+    
+    def step(self,x,y,model,loss_func):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        g = tape.gradient(loss,model.trainable_variables)
+
+        flat_g = [tf.reshape(v,[-1]) for v in g]
+        flat_g = tf.concat(flat_g,axis=0)
+        self.norm.assign(tf.norm(flat_g))
+
+        self.base_optim.apply_gradients(zip(g,model.trainable_variables))
+        return loss, y_hat
 
 
 class FriendSAM(tf.keras.optimizers.Optimizer):
@@ -868,6 +1143,7 @@ class SAMMetric(tf.keras.metrics.Metric):
         return self.gdiff,self.gsdiff,self.gvdiff
 
 
+
 def fixed_lrschedule(epoch,lr,config):
     return lr
 
@@ -883,10 +1159,11 @@ def cosine_decay_lrschedule(step,lr,config):
     step = min(step,config['lr_decay_params']['decay_steps'])
     cosine_decay = 0.5 * (1 +tf.math.cos(np.pi * step / config['lr_decay_params']['decay_steps']))
     decayed = (1 - config['lr_decay_params']['alpha']) * cosine_decay + config['lr_decay_params']['alpha']
-    return config['lr_decay_params']['initial_learning_rate'] * decayed
+    return config['lr'] * decayed
 
 
-def callback_selector(config):
+
+def callback_selector(config,model):
     class CustomLRScheduler(tf.keras.callbacks.Callback):
         #sets the LR for the model
         def __init__(self,lr_schedule,config):
@@ -894,21 +1171,26 @@ def callback_selector(config):
             self.lr_schedule = lr_schedule
             self.config = config
             self.local_lr = 0
+            self.epochs = 0
+            self.batches = 0
 
         def on_batch_begin(self, batch, logs=None):
             if self.config['lr_decay_type'] in ['cosine_decay']:
                 #check if the optimzer has a base_optim attribute
                 if hasattr(self.model.optimizer, 'base_optim'):
                     lr = float(tf.keras.backend.get_value(self.model.optimizer.base_optim.lr))
-                    new_lr = self.lr_schedule(batch,lr,self.config)
+                    new_lr = self.lr_schedule((self.epochs * self.batches)+batch,lr,self.config)
                     self.local_lr = new_lr
                     tf.keras.backend.set_value(self.model.optimizer.base_optim.lr, new_lr)
 
                 else:
                     lr = float(tf.keras.backend.get_value(self.model.optimizer.lr))
-                    new_lr = self.lr_schedule(batch,lr,self.config)
+                    new_lr = self.lr_schedule((self.epochs * self.batches)+batch,lr,self.config)
                     self.local_lr = new_lr
                     tf.keras.backend.set_value(self.model.optimizer.lr, new_lr)
+            #tf.print('Learning Rate: ',self.local_lr)
+            if self.epochs == 0:
+                self.batches += 1
                 
         
         def on_epoch_begin(self, epoch, logs=None):
@@ -925,6 +1207,13 @@ def callback_selector(config):
                     new_lr = self.lr_schedule(epoch,lr,self.config)
                     self.local_lr = new_lr
                     tf.keras.backend.set_value(self.model.optimizer.lr, new_lr)
+        
+        def on_epoch_end(self, epoch, logs=None):
+            #wandb.log({'lr':self.local_lr},commit=True)
+            #tf.print('Learning Rate: ',self.local_lr)
+            self.epochs += 1
+            print('Epoch: ',epoch)
+            print('Batches: ',self.batches)
             wandb.log({'lr':self.local_lr},commit=False)
             tf.print('Learning Rate: ',self.local_lr)
 
@@ -942,6 +1231,44 @@ def callback_selector(config):
                 wandb.log({'gdiff':gdiff,'gsdiff':gsdiff,'gvdiff':gvdiff},commit=True)
                 angles = tf.keras.backend.get_value(self.model.optimizer.angles)
                 wandb.log({'angles':angles},commit=True)
+    
+    class BestAccuracy(tf.keras.callbacks.Callback):
+        def __init__(self):
+            super().__init__()
+            self.best_acc = 0
+            self.best_val_acc = 0
+        
+        def on_test_end(self,logs=None):
+            #record the best test acc
+            print(tf.keras.backend.get_value(self.model.metrics[1].result()))
+            curr_acc = float(tf.keras.backend.get_value(self.model.metrics[1].result()))
+            #curr_val_acc = float(tf.keras.backend.get_value(self.model.metrics_list.val_accuracy))
+
+            if curr_acc > self.best_acc:
+                self.best_acc = curr_acc
+            #if curr_val_acc > self.best_val_acc:
+                #self.best_val_acc = curr_val_acc
+
+            wandb.log({'best_acc':self.best_acc},commit=False)
+        
+    class NormCallback(tf.keras.callbacks.Callback):
+        def __init__(self):
+            super().__init__()
+            self.epoch = tf.Variable(0.0)
+            self.nbatches = tf.Variable(0.0)
+        def on_batch_end(self,batch,logs=None):
+            if self.epoch == 0:
+                bn = batch
+                self.nbatches.assign_add(1.0)
+            else:
+                bn = self.nbatches * self.epoch + batch
+            
+            wandb.log({'batch_norm':float(tf.keras.backend.get_value(self.model.optimizer.norm))},step=bn)
+        
+        def on_epoch_end(self,epoch,logs=None):
+            self.epoch.assign_add(1.0)
+
+            
             
     #this defiens any callback for the fit function
     callbacks = []
@@ -952,10 +1279,20 @@ def callback_selector(config):
     elif config['lr_decay_type'] == 'percentage_step_decay':
         lr_callback = CustomLRScheduler(percentage_step_decay_lrschedule,config)
         callbacks.append(lr_callback)
+    elif config['lr_decay_type'] == 'cosine_decay':
+        print('Cosine Decay Setup')
+        lr_callback = CustomLRScheduler(cosine_decay_lrschedule,config)
+        callbacks.append(lr_callback)
 
     if config['optimizer'] == 'SAM_Metrics':
         sam_callback = CustomSAMCallback()
         callbacks.append(sam_callback)
+
+    best_accuracy = BestAccuracy()
+    callbacks.append(best_accuracy)
+
+    norms = NormCallback()
+    callbacks.append(norms)
     print('Callbacks: ',callbacks)
     
     return callbacks
@@ -2224,6 +2561,10 @@ def model_selector(model_name,config):
 def optimizer_selector(optimizer_name,config):
     if optimizer_name == 'SGD':
         optim= tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum'])
+    elif optimizer_name == 'NormSGD':
+        optim= NormSGD(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    elif optimizer_name == 'CustomSGD':
+        optim= CustomSGD(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'Adam':
         optim= tf.keras.optimizers.Adam(learning_rate=config['lr'])
     elif optimizer_name == 'SAM_SGD':
@@ -2236,6 +2577,10 @@ def optimizer_selector(optimizer_name,config):
         optim= mSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'lmSAM_SGD':
         optim= lmSAM(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    elif optimizer_name == 'lmSAM1_SGD':
+        optim= lmSAM1(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    elif optimizer_name == 'lmSAM2_SGD':
+        optim= lmSAM2(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'SAM_Metrics':
         optim= SAM_Metrics(5,tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'FriendSAM_SGD':
