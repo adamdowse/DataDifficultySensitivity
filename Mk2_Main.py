@@ -41,7 +41,7 @@ def main(config):
     if config['batch_calc_epoch_limit'] is not None and config['batch_calc_epoch_limit'] > 0:
         EOBCallback = FC.CustomEOB(data.train_data,model,config,tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE))
         callbacks.append(EOBCallback)
-    EOBCallback = FC.CustomEOB(data.train_data,model,config,tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE))
+    #EOBCallback = FC.CustomEOB(data.train_data,model,config,tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE))
     wandbcallback = wandb.keras.WandbCallback(save_model=False)
     callbacks.append(wandbcallback)
     print('Callbacks:',callbacks)
@@ -70,7 +70,7 @@ if __name__ == '__main__':
     print('r: ',args.r)
     print('o: ',args.o)
 
-    config = {'group':'NormSGD',
+    config = {'group':'t2',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.9,0.1,0],
@@ -80,7 +80,7 @@ if __name__ == '__main__':
                 'dropout':0.0,
                 'lr':0.001,
                 'lr_decay_params': {'alpha':0.00001,'decay_steps':150*391},
-                'lr_decay_type':'cosine_decay', #fixed, exp_decay, percentage_step_decay,cosine_decay
+                'lr_decay_type':'fixed', #fixed, exp_decay, percentage_step_decay,cosine_decay
                 'batch_size':128,
                 'label_smoothing':None,
                 'model_init_type':None,
@@ -88,13 +88,14 @@ if __name__ == '__main__':
                 'model_vars': None, #var = [max_features,sequence_length,embedding_dim]
                 'num_classes':10,
                 'img_size':(32,32,3),
-                'rho':args.r, # radius of ball 
-                'rho_decay':1, # 1 = no decay
-                'm':args.m, # must be less than batch size
                 'augs': {"normalise":'resnet50','flip':'horizontal','crop':4}, #{'flip':'horizontal','crop':4,"normalise":'resnet50'},#{'flip':horizonatal,"crop":padding},
                 'weight_reg':0.0005,
                 'epochs': 200,
 
+                'rho':args.r, # radius of ball 
+                'rho_decay':1, # 1 = no decay
+                'm':args.m, # must be less than batch size
+                
                 'batch_calc_epoch_limit':1, #limit for using batch calcs and logging, if None or 0 then recording is off
                 'batch_calc_freq':1,
                 'epoch_calc_freq':1,
@@ -102,8 +103,8 @@ if __name__ == '__main__':
                 'FIM_bs':5,
                 'FIM_limit':1000,
                 'FIM_groups':8,
-                'Loss_spec_calc':False,
-                'Grad_alignment_calc':False,
+                'Loss_spec_calc':True,
+                'Grad_alignment_calc':True,
                 'Grad_bs':5,
                 }
     wandb.init(project="NormSGD",config=config)

@@ -16,10 +16,10 @@ def calc_train_loss_spectrum(dataset,model,loss_func,limit=None,sort=True,save=F
     #model class
     print('Calculating Loss Spectrum')
     t = time.time()
-    if limit != None:
-        count = limit
-    else:
-        count = dataset.train_count
+    # if limit != None:
+    #     count = limit
+    # else:
+    #     count = dataset.train_count
 
     for step, (imgs, labels) in enumerate(dataset):
         if step % 100 == 0:
@@ -47,12 +47,12 @@ def calc_train_loss_spectrum(dataset,model,loss_func,limit=None,sort=True,save=F
     #lowest loss
     lowest_bound = loss_spectrum[0]
 
-    if save:
-        combined_row = np.append(lowest_bound,upper_bounds,group_means)
-        with open("LossSpectrums/"+datetime+wandb.run.id+".csv","a+") as f:
-            writer = csv.writer(f)
-            #write loss spectrum to file
-            writer.writerow(combined_row)
+    # if save:
+    #     combined_row = np.append(lowest_bound,upper_bounds,group_means)
+    #     with open("LossSpectrums/"+datetime+wandb.run.id+".csv","a+") as f:
+    #         writer = csv.writer(f)
+    #         #write loss spectrum to file
+    #         writer.writerow(combined_row)
 
     print('--> time: ',time.time()-t)
     return loss_spectrum,lowest_bound,upper_bounds,group_means,group_medians
@@ -377,7 +377,7 @@ class CustomEOE(tf.keras.callbacks.Callback):
                 logLoss = False
 
             elif self.config['Loss_spec_calc'] == True:
-                loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=True)
+                loss_spectrum,lowest_bound,upper_bounds,loss_group_means,loss_group_medians = calc_train_loss_spectrum(self.ds,self.model,self.loss_func,limit=None,sort=True,save=False)
                 logFIM = False
                 logLoss = True
             
