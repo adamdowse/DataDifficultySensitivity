@@ -70,13 +70,13 @@ if __name__ == '__main__':
     print('r: ',args.r)
     print('o: ',args.o)
 
-    config = {'group':'t2',
+    config = {'group':'fixednorm',
                 'loss_func':'categorical_crossentropy',
                 'data_name':'cifar10',
                 'data_split':[0.9,0.1,0],
                 'acc_sample_weight':None,
                 'optimizer':args.o,
-                'momentum':0.9,
+                'momentum':0,
                 'dropout':0.0,
                 'lr':0.001,
                 'lr_decay_params': {'alpha':0.00001,'decay_steps':150*391},
@@ -95,17 +95,21 @@ if __name__ == '__main__':
                 'rho':args.r, # radius of ball 
                 'rho_decay':1, # 1 = no decay
                 'm':args.m, # must be less than batch size
+
+                'norm_scale':1, #number fixes the norm of the gradient, 'sgd' uses the norm of the sgd grad, 'norm' uses the norm of the norm grad, 'boxcox' uses the boxcox adjusted norm
+                'direction':'norm', #sgd, norm, boxcox
                 
-                'batch_calc_epoch_limit':1, #limit for using batch calcs and logging, if None or 0 then recording is off
-                'batch_calc_freq':1,
+                'batch_calc_epoch_limit':0, #limit for using batch calcs and logging, if None or 0 then recording is off
+                'batch_calc_freq':0,
                 'epoch_calc_freq':1,
                 'FIM_calc':False,
                 'FIM_bs':5,
                 'FIM_limit':1000,
                 'FIM_groups':8,
-                'Loss_spec_calc':True,
-                'Grad_alignment_calc':True,
+                'Loss_spec_calc':False,
+                'Grad_alignment_calc':False,
                 'Grad_bs':5,
                 }
+    config['norm_name'] = 'dir_'+str(config['direction'])+'_scale_'+str(config['norm_scale'])
     wandb.init(project="NormSGD",config=config)
     main(config)

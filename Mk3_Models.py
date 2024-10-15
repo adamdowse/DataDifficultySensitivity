@@ -28,6 +28,7 @@ class Model(tf.keras.Model):
         self.max_test_accuracy = 0
         self.lr = None
         self.epoch = tf.Variable(0)
+        self.batch = tf.Variable(0)
 
     def load_metrics(self,config):
         self.metrics_list = []
@@ -46,7 +47,7 @@ class Model(tf.keras.Model):
             self.optimizer.setup(self.model)
 
     def _log(items,step):
-        wandb.log(items,step=step)
+        wandb.log(items,step=self.batch)
 
     @tf.function
     def train_step(self, data):
@@ -57,7 +58,7 @@ class Model(tf.keras.Model):
                 loss = self.compiled_loss(y, y_hat)
             gradients = tape.gradient(loss, self.model.trainable_variables)
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-        elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD','lmSAM_SGD','lmSAM1_SGD','lmSAM2_SGD','NormSGD','NormSGD2','NormSGD3','CustomSGD']:
+        elif self.config['optimizer'] in ['SAM_SGD','FSAM_SGD','ASAM_SGD','mSAM_SGD','lmSAM_SGD','lmSAM1_SGD','lmSAM2_SGD','NormSGD','NormSGD2','NormSGDBoxCox','NormSGD4','NormSGDFixed','CustomSGD','CustomSGDFixed']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
         elif self.config['optimizer'] in ['SAM_Metrics','FriendSAM_SGD','angleSAM_SGD']:
             loss, y_hat = self.optimizer.step(x,y,self.model,self.compiled_loss)
@@ -525,7 +526,9 @@ class oldlmSAM(tf.keras.optimizers.Optimizer):
         self.rho = self.rho * self.rho_decay
         return loss,y_hat
 
-class NormSGD(tf.keras.optimizers.Optimizer):
+
+
+class NormSGD_old(tf.keras.optimizers.Optimizer):
     #normalise each gradient in the batch such that higher loss does not have more power over low loss data.
     def __init__(self,base_optim,config,name="NormSGD",**kwargs):
         super().__init__(name,**kwargs)
@@ -615,7 +618,7 @@ class NormSGD(tf.keras.optimizers.Optimizer):
 
         return loss, y_hat
 
-class NormSGD2(tf.keras.optimizers.Optimizer):
+class NormSGD2_old(tf.keras.optimizers.Optimizer):
     #normalise each gradient in the batch such that higher loss does not have more power over low loss data.
     def __init__(self,base_optim,config,name="NormSGD2",**kwargs):
         super().__init__(name,**kwargs)
@@ -704,15 +707,263 @@ class NormSGD2(tf.keras.optimizers.Optimizer):
 
         return loss, y_hat
 
-class NormSGD3(tf.keras.optimizers.Optimizer):
-    #normalise each gradient in the batch such that higher loss does not have more power over low loss data.
-    def __init__(self,base_optim,config,name="NormSGD3",**kwargs):
+#NormSGD can use dir and scale of both sgd and normalised grads also does fixed scaling
+class NormSGD(tf.keras.optimizers.Optimizer):
+    #dir(SGD) scale(norm)
+    def __init__(self,base_optim,config,name="NormSGD",**kwargs):
+        super().__init__(name,**kwargs)
+        self.base_optim = base_optim
+        self.scale = config['norm_scale']
+        self.direction = config['direction']
+        self.batch_norm = tf.Variable(0.0) 
+
+
+    def tf_shape(self,x):
+        return tf.shape(x)
+
+    def reduce_mult(self,x):
+        y = 0
+        j =0
+        for xi in x:
+            if j == 0:
+                y = xi
+                j+=1
+            else:
+                y = y*xi
+        return y
+
+    def individual_step(self,x1,y1,model,loss_func):
+        #return the normalised gradent of each item in the batch
+        x1 = tf.expand_dims(x1,axis=0)
+        y1 = tf.expand_dims(y1,axis=0)
+        with tf.GradientTape() as tape:
+            y_hat = model(x1,training=True)
+            loss = loss_func(y1,y_hat)
+        g = tape.gradient(loss,model.trainable_variables) #get all the gradients for the item from the batch
+        g = [tf.reshape(l,[-1]) for l in g] #reshape the gradient to [num_layer_params x layers]
+        g = tf.concat(g,axis=0) #concat the gradient over the layers [num_params]
+        return g, loss,y_hat
+
+    def step(self, x, y, model, loss_func):
+        #get grad of each item in batch
+        c = 0.0
+        y_hats = tf.TensorArray(tf.float32, size=self.tf_shape(x)[0])
+        g_sgd,loss,y_hat = self.individual_step(x[0],y[0],model,loss_func)
+        g_norm = tf.linalg.normalize(g_sgd)[0]
+        y_hats = y_hats.write(0,tf.squeeze(y_hat))
+        for i in range(self.tf_shape(x)[0]):
+            if i == 0:
+                pass
+            else:
+                tg,tl,tyh = self.individual_step(x[i],y[i],model,loss_func)
+                g_sgd = g_sgd+tg #sum the sgd grads
+                g_norm = g_norm + tf.linalg.normalize(tg)[0]
+                loss = loss + tl
+                y_hats = y_hats.write(i,tf.squeeze(tyh))
+            c+=1.0
+        
+        #get final norms and direction
+        g_sgd = g_sgd/c #average the sgd grads
+        g_norm = g_norm/c #average the normalised grads
+        scale_sgd = tf.norm(g_sgd) #get the scale of the sgd grads
+        scale_norm = tf.norm(g_norm) #get the scale of the normalised grads
+
+        #combine dir and scale
+        if isinstance(self.scale, str):
+            if self.scale == 'sgd':
+                scale = scale_sgd
+            elif self.scale == 'norm':
+                scale = scale_norm
+            else:
+                scale = 100.0 #indicates a probelm
+        else:
+            scale = self.scale #fixed scaling
+
+        self.batch_norm.assign(scale)
+
+
+        if self.direction == 'sgd':
+            g = tf.linalg.normalize(g_sgd)[0] * scale
+        elif self.direction == 'norm':
+            g = tf.linalg.normalize(g_norm)[0] * scale
+        else:
+            g = tf.linalg.normalize(g_norm)[0] * scale #shouldnt end up here
+
+        loss = loss/c
+        y_hats = y_hats.stack()
+
+        #reshape to wights shape
+        layer_shapes = [v.shape for v in model.trainable_variables]
+        reshaped = [tf.zeros_like(v.shape) for v in model.trainable_variables]
+        i = 0
+        c = 0
+        for ls in layer_shapes:
+            reshaped[i] = tf.reshape(g[c:c+self.reduce_mult(ls)],ls)
+            c += self.reduce_mult(ls)
+            i += 1
+
+        self.base_optim.apply_gradients(zip(reshaped,model.trainable_variables))
+
+        return loss, y_hats
+
+class CustomSGD(tf.keras.optimizers.Optimizer):
+    def __init__(self,base_optim,config,name="CustomSGD",**kwargs):
+        super().__init__(name,**kwargs)
+        self.batch_norm = tf.Variable(0.0)
+        self.base_optim = base_optim
+    
+    def step(self,x,y,model,loss_func):
+        with tf.GradientTape() as tape:
+            y_hat = model(x,training=True)
+            loss = loss_func(y,y_hat)
+        g = tape.gradient(loss,model.trainable_variables)
+
+        flat_g = [tf.reshape(v,[-1]) for v in g]
+        flat_g = tf.concat(flat_g,axis=0)
+        
+        self.batch_norm.assign(tf.norm(flat_g))
+
+
+        self.base_optim.apply_gradients(zip(g,model.trainable_variables))
+        return loss, y_hat
+
+class NormSGDBoxCox(tf.keras.optimizers.Optimizer):
+    #fix the skew in the norm distribution of the gradients
+    # - This is the dir(boxcox nomalised grads) scale()
+    def __init__(self,base_optim,config,name="NormSGDboxcox",**kwargs):
         super().__init__(name,**kwargs)
         self.base_optim = base_optim
         self.nored_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False,reduction=tf.keras.losses.Reduction.NONE)
-        self.scale = 0.5
-        self.item_norm = tf.Variable(0.0) # avg of norms of items
-        self.avg_norm = tf.Variable(0.0) # avg norm of avg batch grad
+        self.scale = config['norm_scale']
+        self.direction = config['direction']
+        self.batch_norm = tf.Variable(0.0) #norm of gradient use in update
+
+        #these will be updated at the end of the epoch
+        self.lam = tf.Variable(0.0)
+        
+        self.recorded_points = 10000
+        self.norm_list = tf.Variable(tf.zeros([self.recorded_points]),trainable=False)
+        self.norm_index = tf.Variable(0) #set to zero at end of epoch
+
+
+    def tf_shape(self,x):
+        return tf.shape(x)
+
+    def reduce_mult(self,x):
+        y = 0
+        j =0
+        for xi in x:
+            if j == 0:
+                y = xi
+                j+=1
+            else:
+                y = y*xi
+        return y
+
+    def individual_step(self,x1,y1,model,loss_func):
+        #return the normalised gradent of each item in the batch
+        x1 = tf.expand_dims(x1,axis=0)
+        y1 = tf.expand_dims(y1,axis=0)
+        with tf.GradientTape() as tape:
+            y_hat = model(x1,training=True)
+            loss = loss_func(y1,y_hat)
+        g = tape.gradient(loss,model.trainable_variables) #get all the gradients for the item from the batch
+        g = [tf.reshape(l,[-1]) for l in g] #reshape the gradient to [num_layer_params x layers]
+        g = tf.concat(g,axis=0) #concat the gradient over the layers [num_params]
+        return g, loss,y_hat
+
+    def boxcox(self,x):
+        if self.lam == 0:
+            #this is traditionally the log function but our lam is 0 on first iteration
+            return x
+        else:
+            return (x**self.lam - 1)/self.lam
+
+    def set_lambda(self,lam):
+        #called at eoe
+        self.lam.assign(lam)
+        self.norm_index.assign(0)
+
+
+    def update_norm_list(self,norm,index):
+        if index < self.recorded_points:
+            self.norm_list[index].assign(norm)
+            self.norm_index.assign_add(1)
+
+
+    def step(self, x, y, model, loss_func):
+        #get grad of each item in batch
+        g_sgd,loss,y_hat = self.individual_step(x[0],y[0],model,loss_func)
+        g_normalised, g_norm = tf.linalg.normalize(g_sgd)
+        self.update_norm_list(g_norm,self.norm_index) #add the first item to the norm list
+        g_norm = self.boxcox(g_norm) #transform norm with boxcox
+        g_boxcox = g_normalised * g_norm # dir * updated norm
+
+        y_hats = tf.TensorArray(tf.float32, size=self.tf_shape(x)[0])
+        y_hats = y_hats.write(0,tf.squeeze(y_hat))
+
+        c = 0.0
+        for i in range(self.tf_shape(x)[0]):
+            if i == 0:
+                pass
+            else:
+                tg_sgd,tl,tyh = self.individual_step(x[i],y[i],model,loss_func)
+                tgnormalised,tgnorm = tf.linalg.normalize(tg_sgd)
+                self.update_norm_list(tgnorm,self.norm_index)
+                tgnorm = self.boxcox(tgnorm)
+                tg = tgnormalised * tgnorm # += dir * updated norm
+                g_sgd = g_sgd+tg_sgd #sum the sgd grads
+                g_boxcox = g_boxcox + tg #sum the boxcox grads
+                loss = loss + tl
+                y_hats = y_hats.write(i,tf.squeeze(tyh))
+            c+=1.0
+
+
+        g_sgd = g_sgd/c #average the sgd grads
+        g_boxcox = g_boxcox/c #average the boxcox grads
+        loss = loss/c
+        y_hats = y_hats.stack()
+
+        if isinstance(self.scale, str):
+            if self.scale == 'sgd':
+                scale = tf.norm(g_sgd)
+            elif self.scale == 'boxcox':
+                scale = tf.norm(g_boxcox)
+            else:
+                scale = 100.0
+        else:
+            scale = self.scale
+
+        self.batch_norm.assign(scale)
+
+        if self.direction == 'sgd':
+            g = tf.linalg.normalize(g_sgd)[0] * scale
+        elif self.direction == 'boxcox':
+            g = tf.linalg.normalize(g_boxcox)[0] * scale
+        else:
+            g = tf.linalg.normalize(g_boxcox)[0] * scale
+
+        #reshape to wights shape
+        layer_shapes = [v.shape for v in model.trainable_variables]
+        reshaped = [tf.zeros_like(v.shape) for v in model.trainable_variables]
+        i = 0
+        c = 0
+        for ls in layer_shapes:
+            reshaped[i] = tf.reshape(g[c:c+self.reduce_mult(ls)],ls)
+            c += self.reduce_mult(ls)
+            i += 1
+
+        self.base_optim.apply_gradients(zip(reshaped,model.trainable_variables))
+
+        return loss, y_hats
+
+class NormSGDFixed(tf.keras.optimizers.Optimizer):
+    #normalise each gradient in the batch such that higher loss does not have more power over low loss data.
+    def __init__(self,base_optim,config,name="NormSGDFixed",**kwargs):
+        super().__init__(name,**kwargs)
+        self.base_optim = base_optim
+        self.scale = config['norm_scale']
+        self.batch_norm = tf.Variable(0.0) # avg of norms of items
 
     def tf_shape(self,x):
         return tf.shape(x)
@@ -743,41 +994,30 @@ class NormSGD3(tf.keras.optimizers.Optimizer):
         g_normalise,g_norm = tf.linalg.normalize(g)
         return g_normalise,g_norm, loss,y_hat
 
-        
-
     def step(self, x, y, model, loss_func):
         #get grad of each item in batch
         c = 0.0
+        y_hats = tf.TensorArray(tf.float32, size=self.tf_shape(x)[0])
         g,g_norm,loss,y_hat = self.individual_step(x[0],y[0],model,loss_func)
+        y_hats = y_hats.write(0,tf.squeeze(y_hat))
         for i in range(self.tf_shape(x)[0]):
             if i == 0:
                 pass
             else:
                 tg,tgn,tl,tyh = self.individual_step(x[i],y[i],model,loss_func)
-                g = g+tg
-                g_norm = g_norm + tgn
+                g = g+tg 
                 loss = loss + tl
-                y_hat = y_hat + tyh
+                #concat the predictions
+                y_hats = y_hats.write(i,tf.squeeze(tyh))
             c+=1.0
-        
-        #avg the batch normalised grads
-        g = g/c
-        g_norm = g_norm/c
+            
+        y_hats = y_hats.stack()
+
+        g,_ = tf.linalg.normalize(g) #direction with length 1
         loss = loss/c
-        y_hat = y_hat/c
-        self.item_norm.assign(tf.squeeze(g_norm))
+        self.batch_norm.assign(self.scale)
 
-        #scale by the average norm of the average batch not component average
-        with tf.GradientTape() as tape:
-            y_hat = model(x,training=True)
-            loss = loss_func(y,y_hat)
-        batch_grad = tape.gradient(loss,model.trainable_variables)
-        batch_grad = [tf.reshape(l,[-1]) for l in batch_grad] #reshape the gradient to [num_layer_params x layers]
-        batch_grad = tf.concat(batch_grad,axis=0)
-        batch_normalise,batch_norm = tf.linalg.normalize(batch_grad)
-        g = batch_normalise *g_norm
-        self.avg_norm.assign(tf.squeeze(batch_norm))
-
+        g = g *self.scale #dir(norm) scale(fixed)
 
         #reshape to wights shape
         layer_shapes = [v.shape for v in model.trainable_variables]
@@ -791,14 +1031,25 @@ class NormSGD3(tf.keras.optimizers.Optimizer):
 
         self.base_optim.apply_gradients(zip(reshaped,model.trainable_variables))
 
-        return loss, y_hat
+        return loss, y_hats
 
-class CustomSGD(tf.keras.optimizers.Optimizer):
-    def __init__(self,base_optim,config,name="CustomSGD",**kwargs):
+class CustomSGDFixed(tf.keras.optimizers.Optimizer):
+    def __init__(self,base_optim,config,name="CustomSGDFixed",**kwargs):
         super().__init__(name,**kwargs)
-        self.item_norm = tf.Variable(0.0)
-        self.avg_norm = tf.Variable(0.0)
+        self.batch_norm = tf.Variable(0.0)
         self.base_optim = base_optim
+        self.scale = config['norm_scale']
+    
+    def reduce_mult(self,x):
+        y = 0
+        j =0
+        for xi in x:
+            if j == 0:
+                y = xi
+                j+=1
+            else:
+                y = y*xi
+        return y
     
     def step(self,x,y,model,loss_func):
         with tf.GradientTape() as tape:
@@ -808,12 +1059,24 @@ class CustomSGD(tf.keras.optimizers.Optimizer):
 
         flat_g = [tf.reshape(v,[-1]) for v in g]
         flat_g = tf.concat(flat_g,axis=0)
-        
-        self.avg_norm.assign(tf.norm(flat_g))
 
+        flat_g = tf.linalg.normalize(flat_g)[0] #scale =1 just direction
+        flat_g = flat_g * self.scale #scale by fixed amount
+        self.batch_norm.assign(self.scale)
 
-        self.base_optim.apply_gradients(zip(g,model.trainable_variables))
+        #reshape to wights shape
+        layer_shapes = [v.shape for v in model.trainable_variables]
+        reshaped = [tf.zeros_like(v.shape) for v in model.trainable_variables]
+        i = 0
+        c = 0
+        for ls in layer_shapes:
+            reshaped[i] = tf.reshape(flat_g[c:c+self.reduce_mult(ls)],ls)
+            c += self.reduce_mult(ls)
+            i += 1
+
+        self.base_optim.apply_gradients(zip(reshaped,model.trainable_variables))
         return loss, y_hat
+
 
 
 class FriendSAM(tf.keras.optimizers.Optimizer):
@@ -1406,7 +1669,7 @@ def callback_selector(config,model):
             self.epochs += 1
             print('Epoch: ',epoch)
             print('Batches: ',self.batches)
-            wandb.log({'lr':self.local_lr},commit=False)
+            wandb.log({'lr':self.local_lr},step=tf.keras.backend.get_value(self.model.batch))
             tf.print('Learning Rate: ',self.local_lr)
 
     class CustomSAMCallback(tf.keras.callbacks.Callback):
@@ -1420,9 +1683,9 @@ def callback_selector(config,model):
                 gdiff = float(tf.keras.backend.get_value(self.model.optimizer.g_diff))
                 gsdiff = float(tf.keras.backend.get_value(self.model.optimizer.g_s_diff))
                 gvdiff = float(tf.keras.backend.get_value(self.model.optimizer.g_v_diff))
-                wandb.log({'gdiff':gdiff,'gsdiff':gsdiff,'gvdiff':gvdiff},commit=True)
+                wandb.log({'gdiff':gdiff,'gsdiff':gsdiff,'gvdiff':gvdiff},step=tf.keras.backend.get_value(self.model.batch))
                 angles = tf.keras.backend.get_value(self.model.optimizer.angles)
-                wandb.log({'angles':angles},commit=True)
+                wandb.log({'angles':angles},step=tf.keras.backend.get_value(self.model.batch))
     
     class BestAccuracy(tf.keras.callbacks.Callback):
         def __init__(self):
@@ -1441,33 +1704,40 @@ def callback_selector(config,model):
             #if curr_val_acc > self.best_val_acc:
                 #self.best_val_acc = curr_val_acc
 
-            wandb.log({'best_acc':self.best_acc},commit=False)
+            wandb.log({'best_acc':self.best_acc},step=tf.keras.backend.get_value(self.model.batch))
         
     class NormCallback(tf.keras.callbacks.Callback):
         def __init__(self):
             super().__init__()
-            self.epoch = tf.Variable(0.0)
-            self.nbatches = tf.Variable(0.0)
         def on_batch_end(self,batch,logs=None):
-            if self.epoch == 0:
-                bn = batch
-                self.nbatches.assign_add(1.0)
-            else:
-                bn = self.nbatches * self.epoch + batch
-            
-            wandb.log({'batch_norm':float(tf.keras.backend.get_value(self.model.optimizer.item_norm))},step=bn)
-            wandb.log({'item_norm':float(tf.keras.backend.get_value(self.model.optimizer.item_norm)),'avg_norm':float(tf.keras.backend.get_value(self.model.optimizer.avg_norm))},step=bn)
-        
-        def on_epoch_end(self,epoch,logs=None):
-            self.epoch.assign_add(1.0)
+            bn = tf.keras.backend.get_value(self.model.batch)
+            if hasattr(self.model.optimizer, 'item_norm'):
+                wandb.log({'item_norm':float(tf.keras.backend.get_value(self.model.optimizer.item_norm))},step=bn)
+            if hasattr(self.model.optimizer, 'avg_norm'):
+                wandb.log({'avg_norm':float(tf.keras.backend.get_value(self.model.optimizer.avg_norm))},step=bn)
+            if hasattr(self.model.optimizer, 'batch_norm'):
+                wandb.log({'batch_norm':float(tf.keras.backend.get_value(self.model.optimizer.batch_norm))},step=bn)
 
     class EpochUpdate(tf.keras.callbacks.Callback):
         def __init__(self):
             super().__init__()
+            self.epoch = tf.Variable(0)
+            self.batch = tf.Variable(0)
         
         def on_epoch_end(self,epoch,logs=None):
             if hasattr(self.model.optimizer, 'epoch'):
                 tf.keras.backend.set_value(self.model.optimizer.epoch,epoch)
+            
+            if hasattr(self.model, 'epoch'):
+                tf.keras.backend.set_value(self.model.epoch,self.epoch)
+        
+        def on_batch_end(self,batch,logs=None):
+            if hasattr(self.model.optimizer, 'batch'):
+                tf.keras.backend.set_value(self.model.optimizer.batch,batch)
+            self.batch.assign_add(1)
+
+            if hasattr(self.model, 'batch'):
+                tf.keras.backend.set_value(self.model.batch,self.batch)
 
             
             
@@ -1492,11 +1762,11 @@ def callback_selector(config,model):
     best_accuracy = BestAccuracy()
     callbacks.append(best_accuracy)
 
-    epochupdate = EpochUpdate()
-    callbacks.append(epochupdate)
-
     norms = NormCallback()
     callbacks.append(norms)
+
+    epochupdate = EpochUpdate()
+    callbacks.append(epochupdate)
     print('Callbacks: ',callbacks)
     
     return callbacks
@@ -2767,12 +3037,18 @@ def optimizer_selector(optimizer_name,config):
         optim= tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum'])
     elif optimizer_name == 'NormSGD':
         optim= NormSGD(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
-    elif optimizer_name == 'NormSGD2':
-        optim = NormSGD2(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
-    elif optimizer_name == 'NormSGD3':
-        optim = NormSGD3(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    elif optimizer_name == 'NormSGDBoxCox':
+        optim = NormSGDBoxCox(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    #elif optimizer_name == 'NormSGD3':
+    #    optim = NormSGD3(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'CustomSGD':
         optim= CustomSGD(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    elif optimizer_name == 'CustomSGDFixed':
+        optim= CustomSGDFixed(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    #elif optimizer_name == 'NormSGD4':
+    #    optim= NormSGD4(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
+    #elif optimizer_name == 'NormSGDFixed':
+    #    optim= NormSGDFixed(tf.keras.optimizers.SGD(learning_rate=config['lr'],momentum=config['momentum']),config)
     elif optimizer_name == 'Adam':
         optim= tf.keras.optimizers.Adam(learning_rate=config['lr'])
     elif optimizer_name == 'SAM_SGD':

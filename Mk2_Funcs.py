@@ -5,6 +5,7 @@
 import time
 import tensorflow as tf
 import numpy as np
+import scipy
 import wandb
 import csv
 
@@ -391,25 +392,39 @@ class CustomEOE(tf.keras.callbacks.Callback):
                     avg_cos,avg_norm,group_norms = calc_grad_alignment(self.ds,self.model,self.config['Grad_bs'],self.config['batch_size'],limit=self.config['FIM_limit'],groups=self.config['FIM_groups'],upper_bounds=upper_bounds)
                 else:
                     avg_cos,avg_norm,group_norms = calc_grad_alignment(self.ds,self.model,self.config['Grad_bs'],self.config['batch_size'],limit=self.config['FIM_limit'],groups=self.config['FIM_groups'])
-                wandb.log({'avg_norm':avg_norm},step=epoch)
+                wandb.log({'avg_norm':avg_norm},step=tf.keras.backend.get_value(self.model.batch))
                 for i in range(len(group_norms)):
-                    wandb.log({'group_norm_'+str(i):group_norms[i]},step=epoch)
-                    wandb.log({'avg_cos_'+str(i):avg_cos[i]},step=epoch)
+                    wandb.log({'group_norm_'+str(i):group_norms[i]},step=tf.keras.backend.get_value(self.model.batch))
+                    wandb.log({'avg_cos_'+str(i):avg_cos[i]},step=tf.keras.backend.get_value(self.model.batch))
 
             #log the results
             if logFIM:
                 for i in range(len(group_FIMs)):
-                    wandb.log({'FIM_group_'+str(i):group_FIMs[i]},step=epoch)
-                wandb.log({'FIM_mean':mean_FIM},step=epoch)
+                    wandb.log({'FIM_group_'+str(i):group_FIMs[i]},step=tf.keras.backend.get_value(self.model.batch))
+                wandb.log({'FIM_mean':mean_FIM},step=tf.keras.backend.get_value(self.model.batch))
             if logLoss:
-                wandb.log({'loss_spectrum':loss_spectrum},step=epoch)
+                wandb.log({'loss_spectrum':loss_spectrum},step=tf.keras.backend.get_value(self.model.batch))
                 for i in range(len(upper_bounds)):
-                    wandb.log({'lossUB_'+str(i):upper_bounds[i]},step=epoch)
+                    wandb.log({'lossUB_'+str(i):upper_bounds[i]},step=tf.keras.backend.get_value(self.model.batch))
                 for i in range(len(loss_group_means)):
-                    wandb.log({'loss_mean_'+str(i):loss_group_means[i]},step=epoch)
+                    wandb.log({'loss_mean_'+str(i):loss_group_means[i]},step=tf.keras.backend.get_value(self.model.batch))
                 for i in range(len(loss_group_medians)):
-                    wandb.log({'loss_median_'+str(i):loss_group_medians[i]},step=epoch)
-                wandb.log({'lossLowest':lowest_bound},step=epoch)
+                    wandb.log({'loss_median_'+str(i):loss_group_medians[i]},step=tf.keras.backend.get_value(self.model.batch))
+                wandb.log({'lossLowest':lowest_bound},step=tf.keras.backend.get_value(self.model.batch))
+        
+        if self.config['optimizer'] in ['NormSGDBoxCox']:
+            print('Calculating Lambda for BoxCox')
+            #calc the best lambda to use with boxcox transformation
+            #set index to 0 here
+            #get the norms of the gradients from the optimizer
+            norms = tf.keras.backend.get_value(self.model.optimizer.norm_list)
+            #get the best lambda
+            _,best_lambda = scipy.stats.boxcox(norms,lmbda=None,alpha=None,optimizer=None)
+            wandb.log({'best_lambda':best_lambda},step=tf.keras.backend.get_value(self.model.batch))
+            #set the lambda in the optimizer
+            self.model.optimizer.set_lambda(best_lambda)
+            
+
 
 class CustomEOB(tf.keras.callbacks.Callback):
     #custom end of batch callback
@@ -477,25 +492,25 @@ class CustomEOB(tf.keras.callbacks.Callback):
                 print('avg_norm: ',avg_norm)
                 print('group_norms: ',len(group_norms))
                 print('avg_cos: ',len(avg_cos))
-                wandb.log({'b_avg_norm':avg_norm},step=(self.epoch*self.num_batches)+batch)
+                wandb.log({'b_avg_norm':avg_norm},step=tf.keras.backend.get_value(self.model.batch))
                 for i in range(len(group_norms)):
-                    wandb.log({'b_group_norm_'+str(i):group_norms[i]},step=(self.epoch*self.num_batches)+batch)
-                    wandb.log({'b_avg_cos_'+str(i):avg_cos[i]},step=(self.epoch*self.num_batches)+batch)
+                    wandb.log({'b_group_norm_'+str(i):group_norms[i]},step=tf.keras.backend.get_value(self.model.batch))
+                    wandb.log({'b_avg_cos_'+str(i):avg_cos[i]},step=tf.keras.backend.get_value(self.model.batch))
 
             #log the results
             if logFIM:
                 for i in range(len(group_FIMs)):
-                    wandb.log({'b_FIM_group_'+str(i):group_FIMs[i]},step=(self.epoch*self.num_batches)+batch)
-                wandb.log({'b_FIM_mean':mean_FIM},step=(self.epoch*self.num_batches)+batch)
+                    wandb.log({'b_FIM_group_'+str(i):group_FIMs[i]},step=tf.keras.backend.get_value(self.model.batch))
+                wandb.log({'b_FIM_mean':mean_FIM},step=tf.keras.backend.get_value(self.model.batch))
             if logLoss:
-                wandb.log({'b_loss_spectrum':loss_spectrum},step=(self.epoch*self.num_batches)+batch)
+                wandb.log({'b_loss_spectrum':loss_spectrum},step=tf.keras.backend.get_value(self.model.batch))
                 for i in range(len(upper_bounds)):
-                    wandb.log({'b_lossUB_'+str(i):upper_bounds[i]},step=(self.epoch*self.num_batches)+batch)
+                    wandb.log({'b_lossUB_'+str(i):upper_bounds[i]},step=tf.keras.backend.get_value(self.model.batch))
                 for i in range(len(loss_group_means)):
-                    wandb.log({'b_loss_mean_'+str(i):loss_group_means[i]},step=(self.epoch*self.num_batches)+batch)
+                    wandb.log({'b_loss_mean_'+str(i):loss_group_means[i]},step=tf.keras.backend.get_value(self.model.batch))
                 for i in range(len(loss_group_medians)):
-                    wandb.log({'b_loss_median_'+str(i):loss_group_medians[i]},step=(self.epoch*self.num_batches)+batch)
-                wandb.log({'b_lossLowest':lowest_bound},step=(self.epoch*self.num_batches)+batch)
+                    wandb.log({'b_loss_median_'+str(i):loss_group_medians[i]},step=tf.keras.backend.get_value(self.model.batch))
+                wandb.log({'b_lossLowest':lowest_bound},step=tf.keras.backend.get_value(self.model.batch))
             
 
 
