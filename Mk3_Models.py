@@ -918,7 +918,6 @@ class NormSGDBoxCox(tf.keras.optimizers.Optimizer):
                 y_hats = y_hats.write(i,tf.squeeze(tyh))
             c+=1.0
 
-
         g_sgd = g_sgd/c #average the sgd grads
         g_boxcox = g_boxcox/c #average the boxcox grads
         loss = loss/c

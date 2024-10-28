@@ -97,12 +97,12 @@ if __name__ == '__main__':
                 'm':args.m, # must be less than batch size
 
                 'norm_scale':1, #number fixes the norm of the gradient, 'sgd' uses the norm of the sgd grad, 'norm' uses the norm of the norm grad, 'boxcox' uses the boxcox adjusted norm
-                'direction':'norm', #sgd, norm, boxcox
+                'direction':'sgd', #sgd, norm, boxcox
                 
                 'batch_calc_epoch_limit':0, #limit for using batch calcs and logging, if None or 0 then recording is off
                 'batch_calc_freq':0,
                 'epoch_calc_freq':1,
-                'FIM_calc':False,
+                'FIM_calc':True,
                 'FIM_bs':5,
                 'FIM_limit':1000,
                 'FIM_groups':8,
