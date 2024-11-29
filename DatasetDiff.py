@@ -16,12 +16,15 @@ import tensorflow as tf
 import pandas as pd
 from PIL import Image
 import glob
+import argparse
+import wandb
 
 
 class_names = ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
 
 # 1.
 def build_total_dataset(data_root):
+    print('Building total dataset')
     # put all the data into one dataset
     root =data_root # upper data folder
     #downlaod the CINIC10 dataset
@@ -53,9 +56,10 @@ def build_total_dataset(data_root):
         os.system('cp -r ' + os.path.join(cinic_valid, class_names[i]) + '/. ' + os.path.join(combined, class_names[i]))
     print('Combined dataset created')
 
-def convert_imgs():
+def convert_imgs(data_root):
+    print('Converting images')
     #convert the png to have the correct sRGB profile
-    root ='CombinedData'
+    root =data_root
     combined = os.path.join(root, 'Combined')
     #convert all the images to sRGB
     for i in range(10):
@@ -65,7 +69,8 @@ def convert_imgs():
                 img.save(os.path.join(combined, class_names[i], file))
         print('Converted: ', class_names[i])
 
-def count_classes():
+def count_classes(data_root):
+    print('Counting classes')
     #count the number of images in each class
     root ='CombinedData'
     combined = os.path.join(root, 'Combined')
@@ -73,9 +78,10 @@ def count_classes():
     for i in range(10):
         print('Combined: ', len(os.listdir(os.path.join(combined, class_names[i]))))
 
-def create_random_split_dataset():
+def create_random_split_dataset(data_root):
+    print('Creating random split dataset')
     #create random splits of the data in train and test and record the data in a csv file
-    combined_dir = 'CombinedData/Combined'
+    combined_dir = os.path.join(data_root,'Combined')
 
     #create a df with all the image paths, label and the split it is in
     df = pd.DataFrame(columns=['path', 'label', 'split0'])
@@ -123,7 +129,42 @@ def create_random_split_dataset():
 
     return train_ds, test_ds,ds,df,path_list,label_list
 
+def create_specific_split_dataset(data_root,csv_path):
+    combined_dir = os.path.join(data_root,'Combined')
+    df = pd.read_csv(csv_path)
+    #add root to path
+    df['path'] = combined_dir + '/' + df['path']
+    train_path_list = np.array(df['path'][df['split'] == 'train'])
+    test_path_list = np.array(df['path'][df['split'] == 'test'])
+    train_label_list = np.array(df['label'][df['split'] == 'train'])
+    test_label_list = np.array(df['label'][df['split'] == 'test'])
+
+    train_ds = tf.data.Dataset.from_tensor_slices((train_path_list, train_label_list))
+    test_ds = tf.data.Dataset.from_tensor_slices((test_path_list, test_label_list))
+
+    def process_path(file_path, label):
+        img = tf.io.read_file(file_path)
+        img = tf.image.decode_png(img, channels=3)
+        img = tf.image.resize(img, [32, 32])
+        img = tf.image.convert_image_dtype(img, tf.float32)
+        img /= 255.0
+        return img, label, file_path
+
+    def redu(img, label, file_path):
+        return img, label
+
+    train_ds = train_ds.map(process_path) #now we have a dataset of images, labels and file paths
+    test_ds = test_ds.map(process_path)
+
+    train_ds = train_ds.map(redu)
+    test_ds = test_ds.map(redu)
+
+    return train_ds, test_ds
+
+
+
 def create_model(model_type):
+    print('Creating model')
     if model_type == 'rand':
         moodel_type = np.random.choice(['ResNet', 'CNN'])
     if model_type == 'ResNet':
@@ -148,11 +189,16 @@ def create_model(model_type):
 
 
 def main(data_root, output_root,build_data):
+    print('Main')
+    print('Data root:', data_root)
+    print('Output root:', output_root)
+    print('Build data:', build_data)
     if build_data:
         build_total_dataset(data_root)
         convert_imgs(data_root)
-    count_classes()
-    train_ds,test_ds,ds,df,path_list,label_list = create_random_split_dataset()
+    count_classes(data_root)
+    #train_ds,test_ds,ds,df,path_list,label_list = create_random_split_dataset(data_root)
+    train_ds, test_ds = create_specific_split_dataset(data_root,os.path.join(data_root,'Complex.csv'))
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     #create model
@@ -206,59 +252,75 @@ def main(data_root, output_root,build_data):
             current = logs.get(self.monitor)
             if current is None:
                 return
-
-            if np.less(current - self.min_delta, self.best):
-                self.best = current
-                self.wait = 0
+            if self.monitor in ['loss', 'val_loss']:
+                if np.less(current - self.min_delta, self.best):
+                    self.best = current
+                    self.wait = 0
+                else:
+                    self.wait += 1
+                    if self.wait >= self.patience:
+                        self.stopped_epoch = epoch
+                        self.model.stop_training = True
             else:
-                self.wait += 1
-                if self.wait >= self.patience:
-                    self.stopped_epoch = epoch
-                    self.model.stop_training = True
+                if np.greater(current + self.min_delta, self.best):
+                    self.best = current
+                    self.wait = 0
+                else:
+                    self.wait += 1
+                    if self.wait >= self.patience:
+                        self.stopped_epoch = epoch
+                        self.model.stop_training = True
 
         def on_train_end(self, logs=None):
             if self.stopped_epoch > 0:
                 print(f'Early stopping at epoch {self.stopped_epoch + 1}')
 
+            nored_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,reduction=tf.keras.losses.Reduction.NONE)
             i = 0
-            for img, label, path in self.ds:
-                loss,metric =self.model.evaluate(img, label)
-                self.final_losses[i] = loss
-                i+=1
+            for img, label, path in self.ds: #This is batched
+                with tf.GradientTape() as tape:
+                    pred = self.model(img, training=False)
+                    loss = nored_loss(label, pred)
+                
+                self.final_losses[i:i+len(loss)] = loss
+                i+=len(loss)
 
-    ds = ds.batch(32)
-
-    diff_cb = diff_callback(ds)
-    early_cb = CustomEarlyStopping(ds)
-
-    
+    #ds = ds.batch(32)
+    #diff_cb = diff_callback(ds)
+    early_cb = CustomEarlyStopping(train_ds, monitor='val_accuracy', patience=5, min_delta=0.01)
+    wandbcallback = wandb.keras.WandbCallback(save_model=False)
 
     train_ds = train_ds.shuffle(buffer_size=270000).batch(32)
     test_ds = test_ds.shuffle(buffer_size=270000).batch(32)
 
-    model.fit(train_ds, epochs=250, callbacks=[diff_cb, early_cb], validation_data=test_ds,shuffle=True)
-            
+    model.fit(train_ds, epochs=200, callbacks=[ early_cb,wandbcallback], validation_data=test_ds,shuffle=True) #diff_cb,
 
     #update df
-    df['thresh_diff_01_'+str(0)] = diff_cb.thresh_diff_01
-    df['thresh_diff_001_'+str(0)] = diff_cb.thresh_diff_001
-    df['final_losses_'+str(0)] = early_cb.final_losses
+    #df['thresh_diff_01_'+str(0)] = diff_cb.thresh_diff_01
+    #df['thresh_diff_001_'+str(0)] = diff_cb.thresh_diff_001
+    #df['final_losses_'+str(0)] = early_cb.final_losses
 
     #save the df
-    run_id = str(np.random.uniform(0,100000))
-    df.to_csv(os.path.join(output_root,'diff_metrics_'+run_id+'.csv'))
+    #run_id = str(1)#str(np.random.uniform(0,100000))
+    #df.to_csv(os.path.join(output_root,'diff_metrics_'+run_id+'.csv'))
     #save text file with hyperparameters and final loss and accuracy
     
-
     #TODO need to do this many times and combine the data. It would be best if we could do this in parallel
     
 
 
 if __name__ == '__main__':
+    os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
+    wandb.login()
+    wandb.init(project='DatasetDiffTypes',config={'batch_size':32,'epochs':200,'TrainDS':"Complex.csv"})
     parser = argparse.ArgumentParser(description='Root dirs')
     parser.add_argument('-data', type=str, default='', help='root of the Combined CINIC10 dataset')
     parser.add_argument('-output', type=str, default='', help='root of the folder to save the data')
-    parser.add_argument('-build', type=bool, default=False, help='whether to build the data')
+    parser.add_argument('-build', type=int, default=0, help='whether to build the data')
     args = parser.parse_args()
-    main(args.data, args.output, args.build)
+    if args.build == 1:
+        build_data = True
+    else:
+        build_data = False
+    main(args.data, args.output, build_data)
     
