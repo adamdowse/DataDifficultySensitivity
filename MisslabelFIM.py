@@ -3,11 +3,14 @@
 import numpy as np
 import tensorflow as tf
 
+import lr_schedules
+
 from tensorflow import keras
 import pandas as pd
 import matplotlib.pyplot as plt
 import wandb 
 import os
+from scipy.optimize import curve_fit
 
 class AugmentLossFIMCallback(keras.callbacks.Callback):
     #Show data that is correctly classified against not correctly classified
@@ -97,6 +100,93 @@ class AugmentLossFIMCallback(keras.callbacks.Callback):
     def on_train_end(self, logs=None):
         self.df.to_csv(str(self.prefix)+"LossFIM.csv")
 
+class LayerLossFIMCallback(keras.callbacks.Callback):
+    #Show The relationship between Loss and the FIM of each layer
+    def __init__(self, ds, epochRecord,loss_func, limit=500,doNorm=False,prefix="",do_batch=False):
+        self.ds = ds
+        self.epoch = 0
+        self.epochRecord = epochRecord
+        self.limit = limit
+        self.df = pd.DataFrame(columns=['id'])
+        self.loss_function = loss_func
+        self.doNorm = doNorm
+        self.prefix = prefix
+        self.do_batch = do_batch
+
+    @tf.function
+    def Get_Z_sm(self,items):
+        x,y = items
+        bs = tf.shape(x)[0]
+        
+        with tf.GradientTape() as tape:
+            #print(text_batch[i])
+            y_hat = self.model(x,training=False) #get model output (softmax) [BS x num_classes]
+            loss = self.loss_function(y,y_hat)
+            #Selection based of prop output distribution
+            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
+            #uniform random selection
+            #selected = tf.squeeze(tf.random.uniform((bs,),0,10,dtype=tf.int64))
+            output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
+            output = tf.math.log(output)#tf.math.log(output) #log the output [BS x 1]
+
+        j = tape.jacobian(output,self.model.trainable_variables)
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
+
+        j = [tf.reshape(j[i],(bs,layer_sizes[i])) for i in range(len(j))] #reshape the gradient to [BS x num_layer_params x layers]
+        #square the gradient [BS x num_params]
+        j = [tf.square(j[i]) for i in range(len(j))] #square the gradient [BS x num_layer_params x layers]
+        #sum the values of each layer so size is [BS x num_layers]
+        j = [tf.reduce_sum(j[i],axis=1) for i in range(len(j))] #sum the gradient [BS x num_layers]
+
+        return j, loss,output,y
+
+
+
+    def on_epoch_begin(self, epoch, logs=None):
+        self.epoch = epoch
+        
+    def on_epoch_end(self, epoch, logs=None):
+        if (epoch in self.epochRecord) and not self.do_batch:
+            print("doing LossFIMRecord")
+            c = 0
+            for items in self.ds:
+                if c*items[0].shape[0] > self.limit:
+                    break
+                j, loss,y_hat,y = self.Get_Z_sm(items) #j= [BS x num_layers] loss = [BS x 1] y_hat = [BS x num_classes] y = [BS x num_classes]
+                
+                if c == 0:
+                    FIMs = j
+                    Losses = loss
+                    y_hats = y_hat
+                    c += 1
+                else:
+                    #correct = tf.concat([correct,tf.argmax(y_hat,axis=1) == tf.argmax(y,axis=1)],axis=0)
+                    FIMs = tf.concat([FIMs,j],axis=1)
+                    Losses = tf.concat([Losses,loss],axis=0)
+                    y_hats = tf.concat([y_hats,y_hat],axis=0)
+                    c += 1
+            
+            FIMs = tf.squeeze(FIMs)
+            Losses = tf.squeeze(Losses)
+            y_hats = tf.squeeze(y_hats)
+
+            def func(x,a):
+                return a*np.log(1+x)**2
+
+            #add the FIMs to the dataframe
+            alpha = []
+            for l in range(len(FIMs)):
+                #calc the alpha for the epoch
+                popt, pcov = curve_fit(func, -y_hats.numpy(),FIMs[l].numpy())
+                alpha.append(popt[0])
+
+            self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"alpha":alpha})],ignore_index=True,axis=1)
+            
+
+
+    def on_train_end(self, logs=None):
+        self.df.to_csv(str(self.prefix)+"LossFIM.csv")
+
 class CorrectLossFIMCallback(keras.callbacks.Callback):
     #Show data that is correctly classified against not correctly classified
     def __init__(self, ds, epochRecord,loss_func, limit=500,doNorm=False,prefix="",do_batch=False):
@@ -119,13 +209,17 @@ class CorrectLossFIMCallback(keras.callbacks.Callback):
             #print(text_batch[i])
             y_hat = self.model(x,training=False) #get model output (softmax) [BS x num_classes]
             loss = self.loss_function(y,y_hat)
-            #selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
+            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
             #uniform random selection
-            selected = tf.squeeze(tf.random.uniform((bs,),0,10,dtype=tf.int64))
+            #selected = tf.squeeze(tf.random.uniform((bs,),0,10,dtype=tf.int64))
             output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
+
+            #randomly create a values between 0 and 1 TODO THIS IS CAUSING A PROBLEM
+            #output = tf.squeeze(tf.random.uniform((bs,),0.1,0.9,dtype=tf.float64))
             output = tf.math.log(output)#tf.math.log(output) #log the output [BS x 1]
 
         j = tape.jacobian(output,self.model.trainable_variables)
+        #print(j)
         layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
         j = [tf.reshape(j[i],(bs,layer_sizes[i])) for i in range(len(j))] #reshape the gradient to [BS x num_layer_params x layers]
         j = tf.concat(j,axis=1) #concat the gradient over the layers [BS x num_params]
@@ -134,8 +228,19 @@ class CorrectLossFIMCallback(keras.callbacks.Callback):
         if self.doNorm:
             j = j/tf.cast(tf.reduce_sum(layer_sizes),tf.float32)
 
-        sel = tf.argmax(y_hat,axis=1) == selected
-        return j, loss,y_hat,y,sel
+        sel = tf.argmax(y,axis=1) == selected
+
+        #-log(y_hat) is the log of the output
+        #new_selected = tf.squeeze(tf.random.uniform((bs,),0,10,dtype=tf.int64))
+        #new_output = tf.gather(y_hat,new_selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
+
+        #randomly create a values between 0 and 1
+        #new_output = tf.squeeze(tf.random.uniform((bs,),0,1,dtype=tf.float32))
+        #new_output = tf.math.log(new_output)#tf.math.log(output) #log the output [BS x 1]
+
+        #new_sel = selected == new_selected
+
+        return j, loss,y_hat,y,sel,-output  #,-new_output,new_sel,-output
 
 
 
@@ -149,30 +254,50 @@ class CorrectLossFIMCallback(keras.callbacks.Callback):
             for items in self.ds:
                 if c*items[0].shape[0] > self.limit:
                     break
-                j, loss,y_hat,y,sel = self.Get_Z_sm(items)
+                j, loss,y_hat,y,sel,o = self.Get_Z_sm(items)
                 if c == 0:
                     #where the model is correct
-                    correct = tf.argmax(y_hat,axis=1) == tf.argmax(y,axis=1)
+                    #correct = tf.argmax(y_hat,axis=1) == tf.argmax(y,axis=1)
                     selected = sel
                     FIMs = j
                     Losses = loss
+                    #new_selected = new_sel
+                    #new_output = new_o
+                    output = o
                     c += 1
                 else:
-                    correct = tf.concat([correct,tf.argmax(y_hat,axis=1) == tf.argmax(y,axis=1)],axis=0)
+                    #correct = tf.concat([correct,tf.argmax(y_hat,axis=1) == tf.argmax(y,axis=1)],axis=0)
                     FIMs = tf.concat([FIMs,j],axis=0)
                     Losses = tf.concat([Losses,loss],axis=0)
                     selected = tf.concat([selected,sel],axis=0)
+                    #new_selected = tf.concat([new_selected,new_sel],axis=0)
+                    #new_output = tf.concat([new_output,new_o],axis=0)
+                    output = tf.concat([output,o],axis=0)
                     c += 1
             
             FIMs = tf.squeeze(FIMs)
             Losses = tf.squeeze(Losses)
-            correct = tf.squeeze(correct)
+            #correct = tf.squeeze(correct)
             selected = tf.squeeze(selected)
+            #new_selected = tf.squeeze(new_selected)
+            #new_output = tf.squeeze(new_output)
+            output = tf.squeeze(output)
+
+            def func(x,a):
+                return  a*np.log(1+x)**2
+
+            popt, pcov = curve_fit(func, output.numpy(), FIMs.numpy())
+            print(popt)
+
             #add the FIMs to the dataframe
-            self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"FIM":FIMs.numpy(),str(epoch)+"Loss":Losses.numpy(),str(epoch)+"Selected":selected.numpy()})],ignore_index=True,axis=1)
-            
-            #self.df = self.df.append({str(self.epoch)+"FIM":FIMs[i].numpy(),str(self.epoch)+"Loss":Losses[i].numpy()},ignore_index=True)
-    
+            #self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"FIM":FIMs.numpy(),str(epoch)+"Loss":Losses.numpy(),str(epoch)+"Selected":selected.numpy()})],ignore_index=True,axis=1)
+            #self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"FIM":FIMs.numpy(),str(epoch)+"Selected":selected.numpy(),str(epoch)+"NewOutput":new_output.numpy(),str(epoch)+"NewSelected":new_selected.numpy()})],ignore_index=True,axis=1)
+            #self.df = pd.concat([self.df,pd.DataFrame({str(self.epoch)+"FIM":FIMs.numpy(),str(self.epoch)+"Loss":Losses.numpy(),str(epoch)+"Selected":selected.numpy()})],ignore_index=True,axis=1)
+            #self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"NewOutput":new_output.numpy(),str(epoch)+"Output":output.numpy(),str(epoch)+"NewSelected":new_selected.numpy()})],ignore_index=True,axis=1)
+            #self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"FIM":FIMs.numpy(),str(epoch)+"Output":output.numpy()})],ignore_index=True,axis=1)
+            self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"alpha":popt[0],str(epoch)+"a_var":pcov[0]})],ignore_index=True,axis=1)
+
+
     def on_train_end(self, logs=None):
         self.df.to_csv(str(self.prefix)+"LossFIM.csv")
 
@@ -517,7 +642,7 @@ class Calc_K_On_End(keras.callbacks.Callback):
         j = tf.reduce_sum(j,axis=1) #sum the gradient [ 1]
         return j
 
-    def _on_train_end(self, logs=None):
+    def on_train_end(self, logs=None):
         c = 0
         for items in self.ds:
             if c*items[0].shape[0] > self.limit:
@@ -592,7 +717,131 @@ class Calc_K_On_End(keras.callbacks.Callback):
         print("Lowest Curvature Accuracy: ",lowest_C_acc)
         print("Combined Accuracy: ",combined_acc)
         
+class LogOutsFIM(keras.callbacks.Callback):
+    def __init__(self, ds, epochRecord,loss_func, limit=500,FIM_type='stat',prefix=""):
+        self.ds = ds
+        self.epoch = 0
+        self.epochRecord = epochRecord
+        self.limit = limit
+        self.df = pd.DataFrame(columns=['id'])
+        self.loss_function = loss_func
+        self.prefix = prefix
+        self.FIM_type = FIM_type
 
+    @tf.function
+    def Get_Z_sm_flat(self,items):
+        x,y = items
+        bs = tf.shape(x)[0]
+        
+        with tf.GradientTape() as tape:
+            #print(text_batch[i])
+            y_hat = self.model(x,training=False) #get model output (softmax) [BS x num_classes]
+            loss = self.loss_function(y,y_hat)
+            #selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
+            #select based on flat distribution
+            selected = tf.squeeze(tf.random.uniform((bs,),0,10,dtype=tf.int64))
+            output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
+            output = tf.math.log(output)#tf.math.log(output) #log the output [BS x 1]
+
+        j = tape.jacobian(output,self.model.trainable_variables)
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
+        j = [tf.reshape(j[i],(bs,layer_sizes[i])) for i in range(len(j))] #reshape the gradient to [BS x num_layer_params x layers]
+        j = tf.concat(j,axis=1) #concat the gradient over the layers [BS x num_params]
+        j = tf.square(j) #square the gradient [BS x num_params]
+        j = tf.reduce_sum(j,axis=1) #sum the gradient [ 1]
+        return j, output
+    
+    @tf.function
+    def Get_Z_sm_stat(self,items):
+        x,y = items
+        bs = tf.shape(x)[0]
+        
+        with tf.GradientTape() as tape:
+            #print(text_batch[i])
+            y_hat = self.model(x,training=False) #get model output (softmax) [BS x num_classes]
+            loss = self.loss_function(y,y_hat)
+            selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
+            #select based on flat distribution
+            #selected = tf.squeeze(tf.random.uniform((bs,),0,10,dtype=tf.int64))
+            output = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
+            output = tf.math.log(output)#tf.math.log(output) #log the output [BS x 1]
+
+        j = tape.jacobian(output,self.model.trainable_variables)
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
+        j = [tf.reshape(j[i],(bs,layer_sizes[i])) for i in range(len(j))] #reshape the gradient to [BS x num_layer_params x layers]
+        j = tf.concat(j,axis=1) #concat the gradient over the layers [BS x num_params]
+        j = tf.square(j) #square the gradient [BS x num_params]
+        j = tf.reduce_sum(j,axis=1) #sum the gradient [ 1]
+        return j, output
+    
+    @tf.function
+    def Get_Z_sm_emp(self,items):
+        x,y = items
+        bs = tf.shape(x)[0]
+        #print(y)
+        
+        with tf.GradientTape() as tape:
+            #print(text_batch[i])
+            y_hat = self.model(x,training=False) #get model output (softmax) [BS x num_classes]
+            loss = self.loss_function(y,y_hat)
+            #selected = tf.squeeze(tf.random.categorical(tf.math.log(y_hat), 1)) #sample from the output [BS x 1]
+            #select based on flat distribution
+            #selected = tf.squeeze(tf.random.uniform((bs,),0,10,dtype=tf.int64))
+            output = tf.gather(y_hat,tf.argmax(y,axis=1),axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
+            output = tf.math.log(output)#tf.math.log(output) #log the output [BS x 1]
+
+        j = tape.jacobian(output,self.model.trainable_variables)
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
+        j = [tf.reshape(j[i],(bs,layer_sizes[i])) for i in range(len(j))] #reshape the gradient to [BS x num_layer_params x layers]
+        j = tf.concat(j,axis=1) #concat the gradient over the layers [BS x num_params]
+        j = tf.square(j) #square the gradient [BS x num_params]
+        j = tf.reduce_sum(j,axis=1) #sum the gradient [ 1]
+        return j, output
+        
+    def on_epoch_end(self, epoch, logs=None):
+        if (epoch in self.epochRecord):
+            print("doing LossFIMRecord")
+            c = 0
+            for items in self.ds:
+                if c*items[0].shape[0] > self.limit:
+                    break
+                if self.FIM_type == 'flat':
+                    j, out = self.Get_Z_sm_flat(items)
+                elif self.FIM_type == 'stat':
+                    j, out = self.Get_Z_sm_stat(items)
+                elif self.FIM_type == 'emp':
+                    j, out = self.Get_Z_sm_emp(items)
+                else:
+                    assert False, "FIM type not recognized"
+                if c == 0:
+                    FIMs = j
+                    Outs = out
+                    c += 1
+                else:
+                    FIMs = tf.concat([FIMs,j],axis=0)
+                    Outs = tf.concat([Outs,out],axis=0)
+                    c += 1
+            
+            FIMs = tf.squeeze(FIMs)
+            Outs = tf.squeeze(Outs)
+            #add the FIMs to the dataframe
+            self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"FIM":FIMs.numpy(),str(epoch)+"logOutput":Outs.numpy()})],ignore_index=True,axis=1)
+            
+            #self.df = self.df.append({str(self.epoch)+"FIM":FIMs[i].numpy(),str(self.epoch)+"Loss":Losses[i].numpy()},ignore_index=True)
+    
+    def on_train_end(self, logs=None):
+        self.df.to_csv(str(self.prefix)+"LogOutFIM.csv")
+
+class CustomEarlyStopping(keras.callbacks.Callback):
+    def __init__(self):
+        #early stop if the categorical accuracy is equals 1
+        self.a = 1
+
+        
+    def on_epoch_end(self, epoch, logs=None):
+        if logs["categorical_accuracy"] == 1:
+            self.model.stop_training = True
+        
 
 
 def main(epochs, n, bs,opt,lr):
@@ -618,12 +867,25 @@ def main(epochs, n, bs,opt,lr):
     #     if np.random.rand() < n:
     #         y_train[i,1] = 1
     #         x_train[i] = tf.random.normal(x_train[i].shape, mean=0.5, stddev=0.5, dtype=tf.float64)
+    print(x_train.shape)
+
+    #x_train_blur_025 = [x + tf.random.normal(x.shape, mean=0, stddev=0.25, dtype=tf.float64) for x in x_train[:2000]]
+    #x_train_blur_075 = [x + tf.random.normal(x.shape, mean=0, stddev=0.75, dtype=tf.float64) for x in x_train[:2000]]
+
+    #ensure the data is between 0 and 1
+    #x_train_blur_025 = [tf.clip_by_value(x, 0, 1) for x in x_train_blur_025]
+    #x_train_blur_075 = [tf.clip_by_value(x, 0, 1) for x in x_train_blur_075]
+    #print(x_train_blur
 
     #make dataset
     #correct_train = tf.data.Dataset.from_tensor_slices((x_train[y_train[:,1] == 0], y_train[y_train[:,1] == 0][:,0]))
     #mislabeled_train = tf.data.Dataset.from_tensor_slices((x_train[y_train[:,1] == 1], y_train[y_train[:,1] == 1][:,0]))
+    #random_dataset = tf.data.Dataset.from_tensor_slices((np.random.rand(5000, 32, 32, 3), np.random.choice(10, 5000)))
     train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train)) #[:,0]
-    train_subset = tf.data.Dataset.from_tensor_slices((x_train[:2], y_train[:2]))
+    #train_subset = tf.data.Dataset.from_tensor_slices((x_train[:2], y_train[:2]))
+    #train_blur_025 = tf.data.Dataset.from_tensor_slices((x_train_blur_025, y_train[:2000]))
+    #train_blur_075 = tf.data.Dataset.from_tensor_slices((x_train_blur_075, y_train[:2000]))
+    
     
     test_dataset = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 
@@ -634,26 +896,34 @@ def main(epochs, n, bs,opt,lr):
     def map_fn(image, label):
         #image = tf.cast(image, tf.float32)
         #image = tf.expand_dims(image, -1)
-        return image, tf.squeeze(tf.one_hot(tf.cast(label,tf.int32), 10))
+        return image, tf.squeeze(tf.one_hot(tf.cast(label,tf.int32), 10,on_value=1.0))
 
     train_dataset = train_dataset.map(map_fn)
-    train_subset = train_subset.map(map_fn)
+    #train_subset = train_subset.map(map_fn)
     #correct_train = correct_train.map(map_fn)
     #mislabeled_train = mislabeled_train.map(map_fn)
     test_dataset = test_dataset.map(map_fn)
+    #random_dataset = random_dataset.map(map_fn)
+    #train_blur_025 = train_blur_025.map(map_fn)
+    #train_blur_075 = train_blur_075.map(map_fn)
 
 
     train_dataset = train_dataset.shuffle(buffer_size=1024).batch(bs)
     #correct_train = correct_train.batch(bs)
     #mislabeled_train = mislabeled_train.batch(bs)
     test_dataset = test_dataset.batch(bs)
-    train_subset = train_subset.batch(bs)
+    #train_subset = train_subset.batch(bs)
+    #random_dataset = random_dataset.batch(bs)
+    #train_blur_025 = train_blur_025.batch(bs)
+    #train_blur_075 = train_blur_075.batch(bs)
 
     # Get an item from the test_dataset
     #print(next(iter(test_dataset))[1].shape)
-    print(next(iter(train_subset))[0].shape)
+    #print(next(iter(train_blur))[0].shape)
     #print(next(iter(correct_train))[1].shape)
     #print(next(iter(mislabeled_train))[1].shape)
+    train_dataset = train_dataset.cache().prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+    test_dataset = test_dataset.cache().prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
 
     #create model
@@ -661,18 +931,40 @@ def main(epochs, n, bs,opt,lr):
         #tf.keras.layers.Flatten(input_shape=(32,32,3)),
         tf.keras.layers.Conv2D(32, (3,3), activation='relu', input_shape=(32,32,3)),
         tf.keras.layers.MaxPooling2D((2,2)),
-        tf.keras.layers.Conv2D(64, (3,3), activation='relu'),
+        tf.keras.layers.Conv2D(64, (3,3), activation='relu'), #64
         tf.keras.layers.MaxPooling2D((2,2)),
-        tf.keras.layers.Conv2D(64, (3,3), activation='relu'),
+        tf.keras.layers.Conv2D(64, (3,3), activation='relu'), #64
         tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(64, activation='relu'),
+        tf.keras.layers.Dense(64, activation='relu'), #64
         tf.keras.layers.Dense(10, activation='softmax')
     ])
+    # model = tf.keras.Sequential([
+    #     #tf.keras.layers.Flatten(input_shape=(32,32,3)),
+    #     tf.keras.layers.Conv2D(32, (3,3), activation='relu', input_shape=(28,28,1)),
+    #     tf.keras.layers.Conv2D(8, (3,3), activation='relu'), #64
+    #     tf.keras.layers.Flatten(),
+    #     tf.keras.layers.Dense(32, activation='relu'), #64
+    #     tf.keras.layers.Dense(10, activation='softmax')
+    # ])
+
+
+    #lr_schedule = lr_schedules.StepChange([0,5,30],[0.005,0.001,0.01],100,1563)
+    #lr_schedule = lr_schedules.LinearChange(0.01,0.0001,100,1563)
+    # lr_schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
+    #         0.01,
+    #         1563*10,
+    #         t_mul=2.0,
+    #         m_mul=1.0,
+    #         alpha=0.0,
+    #         name='SGDRDecay'
+    #     )
+    #lr_schedule = 0.001
+    #lr = 0.1
 
     if opt == "Adam":
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     elif opt == "SGD":
-        optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.2)
     else:
         print("Invalid optimizer")
     loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
@@ -684,27 +976,39 @@ def main(epochs, n, bs,opt,lr):
     #FIMMisslabel = GFIMCallback(mislabeled_train, False, 4, nored_loss_fn, False, "Misslabel")
     #FIMCorrect = GFIMCallback(correct_train, False, 4, nored_loss_fn, False, "Correct")
     #FIMAll = GFIMCallback(train_dataset, False, 8, nored_loss_fn, False, "All")
-    #LossFIM = LossFIMCallback(train_dataset, [0,20,40,60,80,99], nored_loss_fn, limit=5000,prefix="2classes",do_Mag=False)
-    #corrCallback = CorrectLossFIMCallback(test_dataset, [0,20,40,60,80,99], nored_loss_fn, limit=5000,prefix="NormalSelectedTest")
+    #LossFIM = LossFIMCallback(train_dataset, [0,20,40,60,80,99], nored_loss_fn, limit=5000,prefix="CCEoff-0_0001",do_Mag=False)
+    #corrCallback = CorrectLossFIMCallback(train_dataset, np.arange(100), nored_loss_fn, limit=5000,prefix="alphaCalcs")
     #AugCallback = AugmentLossFIMCallback(train_subset, [0,20,40,60,80,99], nored_loss_fn, limit=5000,prefix="AugmentTradNoise")
     #SubsetLossFIM = LossFIMCallback(train_subset, [80], nored_loss_fn, limit=10000,prefix="NormalBatch",do_batch=True)
     #corrLossFIM = LossFIMCallback(correct_train, [0,20,40,60,80,100], nored_loss_fn, limit=5000,prefix="RandomCorrect")
     #gradMag = gradMagCallback(train_dataset, [0,20,40,60,80,99], nored_loss_fn, limit=5000,prefix="Normal")
     WandbCallback = wandb.keras.WandbCallback(save_model=False)
-    CalcK = Calc_K_On_End(train_dataset, nored_loss_fn, limit=5000,save=False,prefix="Test")
+    #CalcK = Calc_K_On_End(train_dataset, nored_loss_fn, limit=5000,save=False,prefix="Test")
+    #FIMMaxClass = LossFIMMaxClassOutput([i for i in range(0,101,5)], nored_loss_fn, limit=5000,prefix="MaxClassOutput",classes=10)
+    #LogOutsStat = LogOutsFIM(train_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,FIM_type='stat',prefix="typeStat")
+    LogOutsFlat = LogOutsFIM(train_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,FIM_type='flat',prefix="OptADAMLR0_0001")
+    #LogOutsEmp = LogOutsFIM(train_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,FIM_type='emp',prefix="typeEmp")
+    #LogOutstest = LogOutsFIM(test_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=5000,prefix="testFIMFlatDistShortModel")
+    #LogOutsrand = LogOutsFIM(random_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=4999,prefix="RandFIMSampDist")
+    #LogOutsrBlur025 = LogOutsFIM(train_blur_025, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,prefix="Blur025FIMFlatDist")
+    #LogOutsrBlur075 = LogOutsFIM(train_blur_075, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,prefix="Blur075FIMFlatDist")
+    #LayerLossFIM = LayerLossFIMCallback(train_dataset, np.arange(100), nored_loss_fn, limit=2000,prefix="LayerAlpha")
+    #TestLayerLossFIM = LayerLossFIMCallback(test_dataset, np.arange(100), nored_loss_fn, limit=2000,prefix="TestLayerAlpha")
+
+    #CES = CustomEarlyStopping()
 
     #train the model
-    model.fit(train_dataset, epochs=epochs, validation_data=test_dataset, callbacks=[CalcK,WandbCallback])
+    model.fit(train_dataset, epochs=epochs, validation_data=test_dataset, callbacks=[LogOutsFlat,WandbCallback])
 
     #evaluate the model on the test set with normal predictions and K predictions
-    c=0
-    for test_batch in test_dataset:
-        c+=1
-        print(c)
-        CalcK._K_Predict(test_batch)
-        if c > 10:
-            break
-    CalcK._K_Predict_End()
+    # c=0
+    # for test_batch in test_dataset:
+    #     c+=1
+    #     print(c)
+    #     CalcK._K_Predict(test_batch)
+    #     if c > 10:
+    #         break
+    # CalcK._K_Predict_End()
 
 
 
@@ -739,10 +1043,10 @@ if __name__ == "__main__":
     #prnt("done")
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
     wandb.login()
-    wandb.init(project="MisslabelFIM",name="NormalCalcKLossFIM")
-    wandb.config.epochs = 50
+    wandb.init(project="MisslabelFIM",name="SGDLR0_001mom0_2")
+    wandb.config.epochs = 100
     wandb.config.n = 0.2
     wandb.config.bs = 32
-    wandb.config.lr = 0.01
-    wandb.config.opt = "SGD"
+    wandb.config.lr = 0.0001
+    wandb.config.opt = "Adam"
     main(wandb.config.epochs, wandb.config.n, wandb.config.bs, wandb.config.opt, wandb.config.lr)
