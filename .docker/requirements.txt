@@ -4,6 +4,7 @@ numpy
 tensorflow_addons
 tensorflow_datasets
 tensorflow_probability
+tensorflow_hub
 pyyaml
 h5py
 scikit-learn

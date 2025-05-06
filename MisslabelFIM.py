@@ -428,7 +428,7 @@ class LossFIMCallback(keras.callbacks.Callback):
         j = tf.reduce_sum(j,axis=1) #sum the gradient [ 1]
         if self.doNorm:
             j = j/tf.cast(tf.reduce_sum(layer_sizes),tf.float32)
-        return j, loss
+        return j, loss,output
 
     def on_batch_end(self, batch, logs=None):
         if self.do_batch and (self.epoch in self.epochRecord):
@@ -482,6 +482,7 @@ class LossFIMCallback(keras.callbacks.Callback):
                 self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"FIM":FIMs.numpy(),str(epoch)+"Loss":Losses.numpy(),str(epoch)+"Mag":Mags.numpy()})],ignore_index=True,axis=1)
             else:
                 self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"FIM":FIMs.numpy(),str(epoch)+"Loss":Losses.numpy()})],ignore_index=True,axis=1)
+            
             
             #self.df = self.df.append({str(self.epoch)+"FIM":FIMs[i].numpy(),str(self.epoch)+"Loss":Losses[i].numpy()},ignore_index=True)
     
@@ -805,43 +806,135 @@ class LogOutsFIM(keras.callbacks.Callback):
             for items in self.ds:
                 if c*items[0].shape[0] > self.limit:
                     break
-                if self.FIM_type == 'flat':
-                    j, out = self.Get_Z_sm_flat(items)
-                elif self.FIM_type == 'stat':
-                    j, out = self.Get_Z_sm_stat(items)
-                elif self.FIM_type == 'emp':
-                    j, out = self.Get_Z_sm_emp(items)
-                else:
-                    assert False, "FIM type not recognized"
-                if c == 0:
-                    FIMs = j
-                    Outs = out
-                    c += 1
-                else:
-                    FIMs = tf.concat([FIMs,j],axis=0)
-                    Outs = tf.concat([Outs,out],axis=0)
-                    c += 1
+                if 'flat' in self.FIM_type:
+                    fj, fout = self.Get_Z_sm_flat(items)
+                    if c == 0:
+                        fFIMs = fj
+                        fOuts = fout
+                    else:
+                        fFIMs = tf.concat([fFIMs,fj],axis=0)
+                        fOuts = tf.concat([fOuts,fout],axis=0)
+                if 'stat'in self.FIM_type:
+                    sj, sout = self.Get_Z_sm_stat(items)
+                    if c == 0:
+                        sFIMs = sj
+                        sOuts = sout
+                    else:
+                        sFIMs = tf.concat([sFIMs,sj],axis=0)
+                        sOuts = tf.concat([sOuts,sout],axis=0)
+                if 'emp'in self.FIM_type:
+                    ej, eout = self.Get_Z_sm_emp(items)
+                    if c == 0:
+                        eFIMs = ej
+                        eOuts = eout
+                    else:
+                        eFIMs = tf.concat([eFIMs,ej],axis=0)
+                        eOuts = tf.concat([eOuts,eout],axis=0)
+                c += 1
             
-            FIMs = tf.squeeze(FIMs)
-            Outs = tf.squeeze(Outs)
+            if 'flat' in self.FIM_type:
+                fFIM = tf.reduce_mean(tf.squeeze(fFIMs))
+                fOut = tf.reduce_mean(tf.squeeze(fOuts))
+                wandb.log({self.prefix+"_FlatFIM":fFIM},step=epoch)
+                wandb.log({self.prefix+"_FlatOutput":fOut},step=epoch)
+            if 'stat'in self.FIM_type:
+                sFIM = tf.reduce_mean(tf.squeeze(sFIMs))
+                sOut = tf.reduce_mean(tf.squeeze(sOuts))
+                wandb.log({self.prefix+"_StatFIM":sFIM},step=epoch)
+                wandb.log({self.prefix+"_StatOutput":sOut},step=epoch)
+            if 'emp'in self.FIM_type:
+                eFIM = tf.reduce_mean(tf.squeeze(eFIMs))
+                eOut = tf.reduce_mean(tf.squeeze(eOuts))
+                wandb.log({self.prefix+"_EmpFIM":eFIM},step=epoch)
+                wandb.log({self.prefix+"_EmpOutput":eOut},step=epoch)
+
+
             #add the FIMs to the dataframe
-            self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"FIM":FIMs.numpy(),str(epoch)+"logOutput":Outs.numpy()})],ignore_index=True,axis=1)
+            #self.df = pd.concat([self.df,pd.DataFrame({str(epoch)+"FIM":FIMs.numpy(),str(epoch)+"logOutput":Outs.numpy()})],ignore_index=True,axis=1)
+            def func(x,a):
+                return a*np.log(1+x)**2
+            #remove nans and infs
+            fOuts = tf.where(tf.math.is_nan(fOuts),tf.zeros_like(fOuts),fOuts)
+            fOuts = tf.where(tf.math.is_inf(fOuts),tf.zeros_like(fOuts),fOuts)
+            fFIMs = tf.where(tf.math.is_nan(fFIMs),tf.zeros_like(fFIMs),fFIMs)
+            fFIMs = tf.where(tf.math.is_inf(fFIMs),tf.zeros_like(fFIMs),fFIMs)
+            popt, pcov = curve_fit(func, -tf.squeeze(fOuts).numpy(),tf.squeeze(fFIMs).numpy())
+            wandb.log({self.prefix+"_Alpha":popt[0]},step=epoch)
             
             #self.df = self.df.append({str(self.epoch)+"FIM":FIMs[i].numpy(),str(self.epoch)+"Loss":Losses[i].numpy()},ignore_index=True)
     
-    def on_train_end(self, logs=None):
-        self.df.to_csv(str(self.prefix)+"LogOutFIM.csv")
+    # def on_train_end(self, logs=None):
+    #     self.df.to_csv(str(self.prefix)+"LogOutFIM.csv")
 
 class CustomEarlyStopping(keras.callbacks.Callback):
     def __init__(self):
         #early stop if the categorical accuracy is equals 1
-        self.a = 1
+        self.wait = 0
+        self.max_test_acc = 0
+        self.max_train_acc = 0
 
         
     def on_epoch_end(self, epoch, logs=None):
-        if logs["categorical_accuracy"] == 1:
+        if logs["val_categorical_accuracy"] > self.max_test_acc:
+            self.max_test_acc = logs["val_categorical_accuracy"]
+        else:
+            self.wait += 1
+        if self.wait > 5:
             self.model.stop_training = True
+
         
+class AlphaMAECallback(keras.callbacks.Callback):
+    def __init__(self, ds, epochRecord,loss_func, prefix=""):
+        #This saves the alpha samples for each epochRecord
+        self.ds = ds
+        self.epoch = 0
+        self.epochRecord = epochRecord
+
+        self.df = pd.DataFrame(columns=['id'])
+        self.loss_function = loss_func
+        self.prefix = prefix
+
+    @tf.function
+    def Get_Z_sm_uniform(self,items):
+        x,y = items
+        bs = tf.shape(x)[0]
+        
+        with tf.GradientTape() as tape:
+            #print(text_batch[i])
+            y_hat = self.model(x,training=False) #get model output (softmax) [BS x num_classes]
+            loss = self.loss_function(y,y_hat)
+            selected = tf.squeeze(tf.random.uniform((bs,),0,10,dtype=tf.int64)) #sample from the output [BS x 1]
+            y_hat = tf.gather(y_hat,selected,axis=1,batch_dims=1) #get the output for the selected class [BS x 1]
+            output = tf.math.log(y_hat)#tf.math.log(output) #log the output [BS x 1]
+
+        j = tape.jacobian(output,self.model.trainable_variables)
+        layer_sizes = [tf.reduce_sum(tf.size(v)) for v in self.model.trainable_variables] #get the size of each layer
+        j = [tf.reshape(j[i],(bs,layer_sizes[i])) for i in range(len(j))] #reshape the gradient to [BS x num_layer_params x layers]
+        j = tf.concat(j,axis=1) #concat the gradient over the layers [BS x num_params]
+        j = tf.square(j) #square the gradient [BS x num_params]
+        j = tf.reduce_sum(j,axis=1) #sum the gradient [ 1]
+        return j, y_hat
+    
+    def on_epoch_end(self, epoch, logs=None):
+        if epoch in self.epochRecord:
+            print("doing AlphaMAERecord - Warning Large Files Created")
+            c = 0
+            for items in self.ds:
+                j, y_hat = self.Get_Z_sm_uniform(items)
+                if c == 0:
+                    FIMs = j
+                    Y_hats = y_hat
+                else:
+                    FIMs = tf.concat([FIMs,j],axis=0)
+                    Y_hats = tf.concat([Y_hats,y_hat],axis=0)
+                c += 1
+            
+            FIMs = tf.squeeze(FIMs)
+            Y_hats = tf.squeeze(Y_hats)
+            #add the FIMs to the dataframe and save
+            self.df = pd.concat([self.df,pd.DataFrame({"FIM":FIMs.numpy(),"y_hat":Y_hats.numpy()})],ignore_index=True,axis=1).to_csv(str(self.prefix)+str(epoch)+"LossY_hat.csv")
+            
+    
 
 
 def main(epochs, n, bs,opt,lr):
@@ -898,6 +991,18 @@ def main(epochs, n, bs,opt,lr):
         #image = tf.expand_dims(image, -1)
         return image, tf.squeeze(tf.one_hot(tf.cast(label,tf.int32), 10,on_value=1.0))
 
+    def noise_map(image,label):
+        image = image + tf.random.normal(image.shape, mean=0, stddev=0.05, dtype=tf.float64)
+        image = tf.clip_by_value(image, 0, 1)
+        return image, label
+
+    def flip_map(image,label):
+        image = tf.image.flip_left_right(image)
+        return image, label
+
+    #train_dataset = train_dataset.map(noise_map)
+    #train_dataset = train_dataset.map(flip_map)
+
     train_dataset = train_dataset.map(map_fn)
     #train_subset = train_subset.map(map_fn)
     #correct_train = correct_train.map(map_fn)
@@ -925,17 +1030,19 @@ def main(epochs, n, bs,opt,lr):
     train_dataset = train_dataset.cache().prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
     test_dataset = test_dataset.cache().prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
+    wd = 1e-5
+    weight_decay = tf.keras.regularizers.l2(wd)
 
     #create model
     model = tf.keras.Sequential([
         #tf.keras.layers.Flatten(input_shape=(32,32,3)),
-        tf.keras.layers.Conv2D(32, (3,3), activation='relu', input_shape=(32,32,3)),
+        tf.keras.layers.Conv2D(32, (3,3), activation='relu', input_shape=(32,32,3), kernel_regularizer=weight_decay),
         tf.keras.layers.MaxPooling2D((2,2)),
-        tf.keras.layers.Conv2D(64, (3,3), activation='relu'), #64
+        tf.keras.layers.Conv2D(64, (3,3), activation='relu',kernel_regularizer=weight_decay), #64
         tf.keras.layers.MaxPooling2D((2,2)),
-        tf.keras.layers.Conv2D(64, (3,3), activation='relu'), #64
+        tf.keras.layers.Conv2D(64, (3,3), activation='relu',kernel_regularizer=weight_decay), #64
         tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(64, activation='relu'), #64
+        tf.keras.layers.Dense(64, activation='relu',kernel_regularizer=weight_decay), #64
         tf.keras.layers.Dense(10, activation='softmax')
     ])
     # model = tf.keras.Sequential([
@@ -964,7 +1071,7 @@ def main(epochs, n, bs,opt,lr):
     if opt == "Adam":
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     elif opt == "SGD":
-        optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.2)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr)#momentum=0.2
     else:
         print("Invalid optimizer")
     loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
@@ -986,19 +1093,20 @@ def main(epochs, n, bs,opt,lr):
     #CalcK = Calc_K_On_End(train_dataset, nored_loss_fn, limit=5000,save=False,prefix="Test")
     #FIMMaxClass = LossFIMMaxClassOutput([i for i in range(0,101,5)], nored_loss_fn, limit=5000,prefix="MaxClassOutput",classes=10)
     #LogOutsStat = LogOutsFIM(train_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,FIM_type='stat',prefix="typeStat")
-    LogOutsFlat = LogOutsFIM(train_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,FIM_type='flat',prefix="OptADAMLR0_0001")
+    LogOutsFlat = LogOutsFIM(train_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,FIM_type=['flat','emp'],prefix="Train")
     #LogOutsEmp = LogOutsFIM(train_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,FIM_type='emp',prefix="typeEmp")
-    #LogOutstest = LogOutsFIM(test_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=5000,prefix="testFIMFlatDistShortModel")
+    LogOutstest = LogOutsFIM(test_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,FIM_type=['flat','emp'],prefix="Test")
     #LogOutsrand = LogOutsFIM(random_dataset, [i for i in range(0,101,5)], nored_loss_fn, limit=4999,prefix="RandFIMSampDist")
     #LogOutsrBlur025 = LogOutsFIM(train_blur_025, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,prefix="Blur025FIMFlatDist")
     #LogOutsrBlur075 = LogOutsFIM(train_blur_075, [i for i in range(0,101,5)], nored_loss_fn, limit=2000,prefix="Blur075FIMFlatDist")
     #LayerLossFIM = LayerLossFIMCallback(train_dataset, np.arange(100), nored_loss_fn, limit=2000,prefix="LayerAlpha")
     #TestLayerLossFIM = LayerLossFIMCallback(test_dataset, np.arange(100), nored_loss_fn, limit=2000,prefix="TestLayerAlpha")
+    #AlphaMAE = AlphaMAECallback(train_dataset, [1,20,50], nored_loss_fn, prefix="AlphaMAE")
 
     #CES = CustomEarlyStopping()
 
     #train the model
-    model.fit(train_dataset, epochs=epochs, validation_data=test_dataset, callbacks=[LogOutsFlat,WandbCallback])
+    model.fit(train_dataset, epochs=epochs, validation_data=test_dataset, callbacks=[LogOutsFlat,LogOutstest,WandbCallback])
 
     #evaluate the model on the test set with normal predictions and K predictions
     # c=0
@@ -1043,10 +1151,10 @@ if __name__ == "__main__":
     #prnt("done")
     os.environ['WANDB_API_KEY'] = 'fc2ea89618ca0e1b85a71faee35950a78dd59744'
     wandb.login()
-    wandb.init(project="MisslabelFIM",name="SGDLR0_001mom0_2")
-    wandb.config.epochs = 100
+    wandb.init(project="AlphaSplitPoint",name="LR0_001")
+    wandb.config.epochs = 150
     wandb.config.n = 0.2
     wandb.config.bs = 32
-    wandb.config.lr = 0.0001
-    wandb.config.opt = "Adam"
+    wandb.config.lr = 0.001
+    wandb.config.opt = "SGD"
     main(wandb.config.epochs, wandb.config.n, wandb.config.bs, wandb.config.opt, wandb.config.lr)

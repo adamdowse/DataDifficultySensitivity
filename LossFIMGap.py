@@ -533,15 +533,19 @@ def alphaPlus(train_file_names,test_file_names,output_name):
     #for name in test_file_names:
     #    test_dfs.append(pd.read_csv(name))
 
-    F = np.arange(1,40,2)
-    y = np.arange(2,41,2)
+    F = np.arange(1,20,2)
+    print(F)
+    
+    y = np.arange(2,21,2)
+    print(y)
+
     #calc the alpha for each epoch
     def func(x,a):
         return a*np.log(1+x)**2
 
     #alpha values for each epoch for each df
     
-    alpha_list = np.empty((len(train_file_names), 20))
+    alpha_list = np.empty((len(train_file_names), 10))
     #alpha_test_list = np.empty((len(train_file_names), 20))
 
     print(alpha_list.shape)
@@ -577,6 +581,8 @@ def alphaPlus(train_file_names,test_file_names,output_name):
         
     #     alpha_test_list[j] = alpha_test
     #     j+=1
+    print("Alpha List")
+    print(alpha_list)
     
     def first_nan_index(df):
         return df[df.isna()].index[0] if df.isna().any() else None
@@ -597,13 +603,13 @@ def alphaPlus(train_file_names,test_file_names,output_name):
     #F_avg.append(np.mean(series[str(F[i])]))
     #y_avg.append(np.mean(-series[str(y[i])]))
 
-    BS = [32,32,32,32,32,32]
-    params = ["0.1","0.05","0.01","0.005","0.001","0.0001","Lin(0.001-0.01)","lin(0.01-0.0001)","LRStep[(0,0.005)-(5,0.001)-(30,0.01)]","LRCSR[0.01,e*10,2,1,0]"]
+    BS = [32,32]
+    params = ["0","10"]
 
     colours = ["red","blue","green","orange","purple","brown","pink","grey","black","yellow"]
     #colors = np.linspace(0,1,len(alpha_list))
     for i in range(len(alpha_list)):
-        steps = np.arange(1,100,5)
+        steps = np.arange(1,50,5)
         plt.plot(steps,alpha_list[i],label=str(params[i]),color=colours[i])
         #plt.plot(steps,alpha_test_list[i],label=str(params[i]),color=(colors[i],0,1-colors[i]),linestyle="--")
         if nan_index[i] != None:
@@ -612,13 +618,13 @@ def alphaPlus(train_file_names,test_file_names,output_name):
 
     plt.xlabel("Epoch")
     plt.ylabel("Alpha")
-    plt.xlim(0,100)
+    plt.xlim(0,50)
     #plt.ylim(0,14000)
     #plt.yscale("log")
     plt.title("Alpha vs Epoch (LR)")
-    #plt.legend(loc="upper left",bbox_to_anchor=(1,1))
+    plt.legend(loc="upper left",bbox_to_anchor=(1,1))
     plt.grid(alpha=0.5)
-    plt.savefig(str(output_name)+"EpochNoLeg.png",bbox_inches='tight')
+    plt.savefig(str(output_name)+"Epoch.png",bbox_inches='tight')
     
     plt.clf()
     plnt()
@@ -939,6 +945,63 @@ def lr_testacc(acc_file,output_name):
     plt.savefig("LRVsTA.png")
     plt.clf()
     
+def predictingFIM(file_names,output_name):
+    dfs = []
+    for fn in file_names:
+        df = pd.read_csv(fn)
+        if fn == "AlphaMAE1LossY_hat.csv":
+            df = df.drop(columns=["0"])
+        df = df.drop(columns=["Unnamed: 0"])
+        #set column names
+        print(df.columns)
+        df.columns = ["FIM","y_hat"]
+        dfs.append(df)
+
+
+        
+    
+    #calc alpha for each epoch
+    def func(x,a):
+        return a*np.log(1+x)**2
+
+    
+    
+
+    j = 0
+    alpha = [] 
+    for df in dfs:
+        df["y_hat"] = -np.log(df["y_hat"])
+        df = df.dropna()
+ 
+        popt, pcov = curve_fit(func, df["y_hat"],df["FIM"])
+        alpha.append(popt[0])
+        
+    print(alpha)
+
+    sample_df = []
+    for i in range(len(dfs)):
+        sample_df.append(pd.DataFrame(columns=["Sample_size","Alpha","Diff"]))
+        for j in range(500):
+            #calc the sample size
+            sample_size = np.random.randint(1,len(dfs[i]))
+            sample = dfs[i].sample(sample_size)
+            popt, pcov = curve_fit(func, sample["y_hat"],sample["FIM"])
+            sample_df[i].loc[j] = [sample_size,popt[0],(alpha[i]-popt[0])]
+
+
+    cols = ["red","blue","green"]
+    epochs = [1,20,50]
+    for i in range(len(dfs)):
+        plt.scatter(sample_df[i]["Sample_size"],sample_df[i]["Diff"],label="Epoch "+str(epochs[i]),alpha=0.5,color=cols[i])
+    plt.xlabel("Sample Size")
+    plt.ylabel("Difference in Alpha")
+    plt.title("Difference in Alpha vs Sample Size")
+    plt.legend()
+    plt.savefig("DiffAlphaSampleSize.png")
+    plt.clf()
+
+
+
 
 
     
@@ -957,11 +1020,11 @@ if __name__ == "__main__":
     #YhatYhat("Yhats2ClassLossFIM.csv","negLogYhatToLogYhat2Class")
     #YhatFIM("FIMSampledLogOutFIM.csv","-log(y_hat)FIMFitNormed")
     #LayerFIM("LayerLossFIM.csv","LayerLossFIM")
-    alphaPlus(["OptADAMLR0_0001LogOutFIM.csv",
-                "LRLinear[(0,0.01)-(100,0.0001)LogOutFIM.csv",
+    alphaPlus(["Noise0LogOutFIM.csv",
+        "Noise10LogOutFIM.csv",
        ],
        None,
-       "AlphaFlatDistOpt")
+       "AlphaFlatDistTrainNoise")
     #alphaPlus("LayerAlphaLossFIM.csv","LayerBiasAlphaPlus")
     #FIMtypes(["typeStatLogOutFIM.csv",
         # "typeEmpLogOutFIM.csv",
@@ -980,6 +1043,8 @@ if __name__ == "__main__":
     #     "LRCSR[0.01,e*10,2,1,0]LogOutFIM.csv"],
     #     "LRTestAcc")
     #lr_testacc("LRTestAcc.csv","CIFAR-")
+    #predictingFIM(["AlphaMAE1LossY_hat.csv","AlphaMAE20LossY_hat.csv","AlphaMAE50LossY_hat.csv"],"")
+
 
 
 
