@@ -7,3 +7,7 @@ HAM10000/*
 CIFAR10/*
 SVHN/*
 condor/*
+data/*
+LossSpectrums/*
+CombinedData/*
+FIMLossData/*
