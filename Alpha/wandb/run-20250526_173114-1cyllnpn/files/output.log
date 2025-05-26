@@ -1,0 +1,14 @@
+/usr/local/lib/python3.11/dist-packages/keras/src/layers/convolutional/base_conv.py:107: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.
+  super().__init__(activity_regularizer=activity_regularizer, **kwargs)
+Downloading data from https://storage.googleapis.com/tensorflow/tf-keras-datasets/mnist.npz
+[1m11490434/11490434[0m [32m━━━━━━━━━━━━━━━━━━━━[0m[37m[0m [1m4s[0m 0us/step
+Traceback (most recent call last):
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 178, in <module>
+    compare_alpha(data_config, model_config)
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 22, in compare_alpha
+    mnist_train_dataset, mnist_test_dataset = AlphaData.load_data(data_config["mnist"])
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/com.docker.devenvironments.code/Alpha/AlphaData.py", line 107, in load_data
+    if data_config["splits"] == ["train", "test"]:
+       ~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'splits'

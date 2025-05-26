@@ -1,0 +1,13 @@
+/usr/local/lib/python3.11/dist-packages/keras/src/layers/convolutional/base_conv.py:107: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.
+  super().__init__(activity_regularizer=activity_regularizer, **kwargs)
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:17<00:00, 280.32it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 315.62it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 316.94it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 324.73it/s]
+Traceback (most recent call last):
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 181, in <module>
+    compare_alpha(data_config, model_config)
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 70, in compare_alpha
+    "inv_train": inv_train_imgs,
+                 ^^^^^^^^^^^^^^
+NameError: name 'inv_train_imgs' is not defined

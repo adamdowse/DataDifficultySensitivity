@@ -3,8 +3,6 @@
 
 #This will setup the automatic detection of outliers.
 
-
-
 import tensorflow as tf
 import numpy as np
 import pandas as pd
@@ -12,6 +10,8 @@ from scipy.optimize import curve_fit
 import wandb
 import os
 
+def load_data():
+    
 
 
 def main():
@@ -1040,171 +1040,11 @@ def alpha_weight(name="standard",hard_type="train"):
             
             return results
     
-    class CustomCallback(tf.keras.callbacks.Callback):
-        def __init__(self):
-            super(CustomCallback, self).__init__()
-            pass
+
         
-        def on_epoch_end(self, epoch, logs=None):
-            #save metrics to wandb
-            #get most recent logs
-            print(logs)
-            wandb.log(logs,commit=True)
-
-    class AdditionalValidationSets(tf.keras.callbacks.Callback):
-        def __init__(self, validation_sets, verbose=0, batch_size=None):
-            """
-            :param validation_sets:
-            2-tuples (validation_data, validation_set_name)
-            :param verbose:
-            verbosity mode, 1 or 0
-            :param batch_size:
-            batch size to be used when evaluating on the additional datasets
-            """
-            super(AdditionalValidationSets, self).__init__()
-            self.validation_sets = validation_sets
-            for validation_set in self.validation_sets:
-                if len(validation_set) != 2:
-                    raise ValueError()
-            self.verbose = verbose
-            self.batch_size = batch_size
-
-        def on_epoch_end(self, epoch, logs=None):
-
-            # evaluate on the additional validation sets
-            for validation_set in self.validation_sets:
-                if len(validation_set) == 2:
-                    validation_data, validation_set_name = validation_set
-                else:
-                    raise ValueError()
-
-                results = self.model.evaluate(validation_data,
-                                            verbose=self.verbose,
-                                            batch_size=self.batch_size)
-
-                for metric, result in zip(self.model.metrics_names,results):
-                    valuename = validation_set_name + '_' + metric
-                    wandb.log({valuename: result}, commit=False)
-        
-    class GSLRscheduleCB(tf.keras.callbacks.Callback):
-        def __init__(self, k ):
-            super(GSLRscheduleCB, self).__init__()
-            #decay the learning rate by k if the average gradient scale decreased last epoch
-            self.k = k
-            self.prev_grad_scale = None
-
-        def on_epoch_end(self, epoch, logs=None):
-            #update at the end of each epoch
-            if epoch == 0:
-                #get the average gradient scale from the logs
-                self.prev_grad_scale = logs["grad_scale"]
-                tf.print("First epoch",self.prev_grad_scale)
-            else:
-                if logs["grad_scale"] < self.prev_grad_scale:
-                    #if the gradient scale decreased, decay the learning rate
-                    self.model.optimizer.learning_rate = self.model.optimizer.learning_rate * self.k
-                self.prev_grad_scale = logs["grad_scale"]
-
-    # class GSLRscheduleCBV2(tf.keras.callbacks.Callback):
-    #     def __init__(self, k ):
-    #         super(GSLRscheduleCBV2, self).__init__()
-    #         #decay the learning rate by k if the average gradient scale decreased last epoch
-    #         #this looks within the epoch to calc grad scale change
-    #         self.k = k
-
-    #     def on_epoch_end(self, epoch, logs=None):
-    #         #update at the end of each epoch
-    #         first_half = self.model.optimizer.grad_scale_1 / (self.model.optimizer.total_batches//2)
-    #         second_half = self.model.optimizer.grad_scale_2 / (self.model.optimizer.total_batches//2)
-    #         tf.print("First half: ",first_half," Second half: ",second_half)
-    #         if first_half > second_half:
-    #             #if the gradient scale decreased, decay the learning rate
-    #             self.model.optimizer.learning_rate = self.model.optimizer.learning_rate * self.k
-    #             #reset the grad scales
-    #         self.model.optimizer.grad_scale_1.assign(0.0)
-    #         self.model.optimizer.grad_scale_2.assign(0.0)
-    #         self.model.optimizer.batch_count.assign(0)
-        
-            
+   
 
     
-    class GSLRscheduleCBV3(tf.keras.callbacks.Callback):
-        def __init__(self, k ,LB):
-            super(GSLRscheduleCBV3, self).__init__()
-            #decay the learning rate by k if the average gradient scale decreased last epoch
-            self.k =k
-            # self.a = a
-            # self.b = b
-            self.LB = LB
-            self.prev_grad_scale = []
-
-        def on_epoch_end(self, epoch, logs=None):
-            #update at the end of each epoch
-            if len(self.prev_grad_scale) == 0:
-                #get the average gradient scale from the logs
-                self.prev_grad_scale.append(logs["grad_scale"])
-                tf.print("First epoch",self.prev_grad_scale)
-            else:
-                self.prev_grad_scale.append(logs["grad_scale"])
-                #calc the average direction change over the last LB epochs
-                diffs = [self.prev_grad_scale[i] - self.prev_grad_scale[i-1] for i in range(1,len(self.prev_grad_scale))]
-                avg_diff = tf.reduce_mean(diffs)
-
-                #remove the oldest diff
-                if len(self.prev_grad_scale) > self.LB:
-                    self.prev_grad_scale.pop(0)
-
-                if avg_diff < 0:
-                    #if the gradient scale decreased, decay the learning rate
-                    self.model.optimizer.learning_rate = self.model.optimizer.learning_rate * self.k
-                else:
-                    #if the gradient scale increased, increase the learning rate
-                    self.model.optimizer.learning_rate = self.model.optimizer.learning_rate / self.k
-                #if the gradient scale decreased, decay the learning rate
-                
-    class GSLRscheduleCBV4(tf.keras.callbacks.Callback):
-        def __init__(self, a=50, b=1, extent=0.1, LB=3):
-            super(GSLRscheduleCBV4, self).__init__()
-            #decay the learning rate by k if the average gradient scale decreased last epoch
-            self.extent = extent
-            self.a = a
-            self.b = b
-            self.LB = LB
-            self.prev_grad_scale = []
-
-        def on_epoch_end(self, epoch, logs=None):
-            #update at the end of each epoch
-            if len(self.prev_grad_scale) == 0:
-                #get the average gradient scale from the logs
-                self.prev_grad_scale.append(logs["grad_scale"])
-                tf.print("First epoch",self.prev_grad_scale)
-            else:
-                self.prev_grad_scale.append(logs["grad_scale"])
-                #calc the average direction change over the last LB epochs
-                diffs = [self.prev_grad_scale[i] - self.prev_grad_scale[i-1] for i in range(1,len(self.prev_grad_scale))]
-                avg_diff = tf.reduce_mean(diffs)
-
-                #remove the oldest diff
-                if len(self.prev_grad_scale) > self.LB:
-                    self.prev_grad_scale.pop(0)
-                if avg_diff < 0 :
-                    #if the gradient scale decreased, decay the learning rate
-                    self.model.optimizer.learning_rate = self.model.optimizer.learning_rate * (((2*self.extent*self.b)/(self.b + np.exp(-self.a*avg_diff))) + (1-self.extent))
-
-                
-
-    class GSLRschedule(tf.keras.optimizers.SGD):
-        def __init__(self, initial_learning_rate=0.01):
-            super(GSLRschedule, self).__init__()
-            self.learning_rate = initial_learning_rate
-            self.grad_scale_1 = tf.Variable(0.0)
-            self.grad_scale_2 = tf.Variable(0.0)
-            self.total_batches = 1641
-            self.batch_count = tf.Variable(0)
-
-
-        def __call__(self, step):
-            return self.learning_rate
 
     # Compile the model
     model = Model(name)

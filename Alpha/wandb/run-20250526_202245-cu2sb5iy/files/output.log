@@ -1,0 +1,21 @@
+/usr/local/lib/python3.11/dist-packages/keras/src/layers/convolutional/base_conv.py:107: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.
+  super().__init__(activity_regularizer=activity_regularizer, **kwargs)
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:17<00:00, 287.96it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 317.39it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 320.72it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 323.06it/s]
+Traceback (most recent call last):
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 207, in <module>
+    compare_alpha(data_config, model_config)
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 51, in compare_alpha
+    mnist_alpha, mnist_y, mnist_o,mnist_imgs = AlphaUtils.calc_alpha_percentiles(mnist_train_dataset,
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/com.docker.devenvironments.code/Alpha/AlphaUtils.py", line 251, in calc_alpha_percentiles
+    max_imgs.append((dataset.unbatch().skip(idx).take(1).get_single_element()[0], diffs[idx]))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/tensorflow/python/data/ops/dataset_ops.py", line 2950, in get_single_element
+    gen_dataset_ops.dataset_to_single_element(
+  File "/usr/local/lib/python3.11/dist-packages/tensorflow/python/ops/gen_dataset_ops.py", line 1476, in dataset_to_single_element
+    _result = pywrap_tfe.TFE_Py_FastPathExecute(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

@@ -1,0 +1,16 @@
+{"time":"2025-05-26T17:56:30.265470073Z","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/com.docker.devenvironments.code/Alpha/wandb/run-20250526_175630-nyqbt3ze/logs/debug-core.log"}
+{"time":"2025-05-26T17:56:30.581176261Z","level":"INFO","msg":"created new stream","id":"nyqbt3ze"}
+{"time":"2025-05-26T17:56:30.581209463Z","level":"INFO","msg":"stream: started","id":"nyqbt3ze"}
+{"time":"2025-05-26T17:56:30.581268966Z","level":"INFO","msg":"handler: started","stream_id":"nyqbt3ze"}
+{"time":"2025-05-26T17:56:30.581677384Z","level":"INFO","msg":"sender: started","stream_id":"nyqbt3ze"}
+{"time":"2025-05-26T17:56:30.582609825Z","level":"INFO","msg":"writer: Do: started","stream_id":"nyqbt3ze"}
+{"time":"2025-05-26T17:56:30.890483564Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-05-26T17:57:46.067220492Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-05-26T17:57:46.067318599Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-05-26T17:57:47.005837713Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-05-26T17:57:47.069201635Z","level":"INFO","msg":"handler: operation stats","stats":{"operations":[{"desc":"uploading data","runtime_seconds":0.063178409}],"total_operations":1}}
+{"time":"2025-05-26T17:57:47.247754314Z","level":"INFO","msg":"stream: closing","id":"nyqbt3ze"}
+{"time":"2025-05-26T17:57:47.247802717Z","level":"INFO","msg":"handler: closed","stream_id":"nyqbt3ze"}
+{"time":"2025-05-26T17:57:47.24784112Z","level":"INFO","msg":"writer: Close: closed","stream_id":"nyqbt3ze"}
+{"time":"2025-05-26T17:57:47.247862821Z","level":"INFO","msg":"sender: closed","stream_id":"nyqbt3ze"}
+{"time":"2025-05-26T17:57:47.247930126Z","level":"INFO","msg":"stream: closed","id":"nyqbt3ze"}

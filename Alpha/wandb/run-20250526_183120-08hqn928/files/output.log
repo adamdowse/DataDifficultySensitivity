@@ -1,0 +1,17 @@
+/usr/local/lib/python3.11/dist-packages/keras/src/layers/convolutional/base_conv.py:107: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.
+  super().__init__(activity_regularizer=activity_regularizer, **kwargs)
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:17<00:00, 283.17it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 313.99it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 323.03it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 317.90it/s]
+Calculating FIM: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5000/5000 [00:15<00:00, 324.79it/s]
+Traceback (most recent call last):
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 207, in <module>
+    compare_alpha(data_config, model_config)
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 59, in compare_alpha
+    filled_alpha, filled_y, filled_o,filled_imgs = AlphaUtils.calc_alpha_percentiles(filled_train_dataset,
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/com.docker.devenvironments.code/Alpha/AlphaUtils.py", line 222, in calc_alpha_percentiles
+    color_map = {c: colors[i] for i, c in enumerate(set(cols))}
+                                                    ^^^^^^^^^
+TypeError: unhashable type: 'numpy.ndarray'

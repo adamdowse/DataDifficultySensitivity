@@ -1,0 +1,23 @@
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_setup.py:_flush():70] Current SDK version is 0.19.11
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_setup.py:_flush():70] Configure stats pid to 57643
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_setup.py:_flush():70] Loading settings from /home/vscode/.config/wandb/settings
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_setup.py:_flush():70] Loading settings from /com.docker.devenvironments.code/Alpha/wandb/settings
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_setup.py:_flush():70] Loading settings from environment variables
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_init.py:setup_run_log_directory():724] Logging user logs to /com.docker.devenvironments.code/Alpha/wandb/run-20250526_181146-nlwp92e7/logs/debug.log
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_init.py:setup_run_log_directory():725] Logging internal logs to /com.docker.devenvironments.code/Alpha/wandb/run-20250526_181146-nlwp92e7/logs/debug-internal.log
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_init.py:init():852] calling init triggers
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_init.py:init():857] wandb.init called with sweep_config: {}
+config: {'model_name': 'simple_cnn', 'input_shape': (32, 32, 3), 'layers': [{'type': 'conv2d', 'filters': 32, 'kernel_size': (3, 3), 'activation': 'relu'}, {'type': 'maxpooling2d', 'pool_size': (2, 2)}, {'type': 'conv2d', 'filters': 64, 'kernel_size': (3, 3), 'activation': 'relu'}, {'type': 'maxpooling2d', 'pool_size': (2, 2)}, {'type': 'conv2d', 'filters': 64, 'kernel_size': (3, 3), 'activation': 'relu'}, {'type': 'flatten'}, {'type': 'dense', 'units': 64, 'activation': 'relu'}, {'type': 'dense', 'units': 10, 'activation': 'softmax'}], 'optimizer': 'sgd', 'loss': 'categorical_crossentropy', 'metrics': ['accuracy'], 'learning_rate': 0.001, 'train_test': {'dataset_name': 'cifar10', 'train_split': 0.8, 'splits': ['train', 'test'], 'normalisation_method': 'div255', 'y_mapping_type': ['onehot'], 'filtering': None, 'augmentations': None, 'batch_size': 32, 'shuffle': True, 'buffer_size': 1000, 'prefetch': True}, 'inv_cols': {'dataset_name': 'cifar10', 'train_split': 0.8, 'splits': ['train', 'test'], 'normalisation_method': 'div255', 'augmentations': [{'name': 'color_inv', 'prob': 1}], 'y_mapping_type': ['onehot'], 'filtering': None, 'batch_size': 32, 'shuffle': False, 'buffer_size': 1000, 'prefetch': True}, 'mnist': {'dataset_name': 'mnist', 'normalisation_method': 'div255', 'splits': ['train', 'test'], 'train_split': 0.5, 'y_mapping_type': ['onehot'], 'augmentations': [{'name': 'scale', 'height': 32, 'width': 32}, {'name': 'to_color'}], 'filtering': None, 'batch_size': 32, 'shuffle': False, 'buffer_size': 1000, 'prefetch': True}, 'filled': {'dataset_name': 'mnist', 'normalisation_method': 'div255', 'splits': ['train', 'test'], 'train_split': 0.5, 'y_mapping_type': ['onehot'], 'augmentations': [{'name': 'scale', 'height': 32, 'width': 32}, {'name': 'fill'}, {'name': 'to_color'}], 'filtering': None, 'batch_size': 32, 'shuffle': False, 'buffer_size': 1000, 'prefetch': True}, '_wandb': {}}
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_init.py:init():893] starting backend
+2025-05-26 18:11:46,420 INFO    MainThread:57643 [wandb_init.py:init():897] sending inform_init request
+2025-05-26 18:11:46,422 INFO    MainThread:57643 [backend.py:_multiprocessing_setup():101] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2025-05-26 18:11:46,422 INFO    MainThread:57643 [wandb_init.py:init():907] backend started and connected
+2025-05-26 18:11:46,424 INFO    MainThread:57643 [wandb_init.py:init():1005] updated telemetry
+2025-05-26 18:11:46,430 INFO    MainThread:57643 [wandb_init.py:init():1029] communicating run to backend with 90.0 second timeout
+2025-05-26 18:11:46,934 INFO    MainThread:57643 [wandb_init.py:init():1104] starting run threads in backend
+2025-05-26 18:11:47,054 INFO    MainThread:57643 [wandb_run.py:_console_start():2573] atexit reg
+2025-05-26 18:11:47,055 INFO    MainThread:57643 [wandb_run.py:_redirect():2421] redirect: wrap_raw
+2025-05-26 18:11:47,055 INFO    MainThread:57643 [wandb_run.py:_redirect():2490] Wrapping output streams.
+2025-05-26 18:11:47,055 INFO    MainThread:57643 [wandb_run.py:_redirect():2513] Redirects installed.
+2025-05-26 18:11:47,058 INFO    MainThread:57643 [wandb_init.py:init():1150] run started, returning control to user process
+2025-05-26 18:13:24,227 INFO    MsgRouterThr:57643 [mailbox.py:close():129] [no run ID] Closing mailbox, abandoning 1 handles.

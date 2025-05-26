@@ -1,0 +1,135 @@
+_wandb:
+    value:
+        cli_version: 0.19.11
+        m: []
+        python_version: 3.11.11
+        t:
+            "1":
+                - 2
+                - 3
+                - 5
+                - 53
+                - 55
+            "2":
+                - 2
+                - 3
+                - 5
+                - 53
+                - 55
+            "3":
+                - 2
+                - 13
+                - 16
+                - 23
+                - 55
+            "4": 3.11.11
+            "5": 0.19.11
+            "8":
+                - 5
+            "12": 0.19.11
+            "13": linux-x86_64
+input_shape:
+    value:
+        - 32
+        - 32
+        - 3
+inv_cols:
+    value:
+        augmentations:
+            - name: color_inv
+              prob: 1
+        batch_size: 32
+        buffer_size: 1000
+        dataset_name: cifar10
+        filtering: null
+        normalisation_method: div255
+        prefetch: true
+        shuffle: false
+        splits:
+            - train
+            - test
+        train_split: 0.8
+        y_mapping_type:
+            - onehot
+layers:
+    value:
+        - activation: relu
+          filters: 32
+          kernel_size:
+            - 3
+            - 3
+          type: conv2d
+        - pool_size:
+            - 2
+            - 2
+          type: maxpooling2d
+        - activation: relu
+          filters: 64
+          kernel_size:
+            - 3
+            - 3
+          type: conv2d
+        - pool_size:
+            - 2
+            - 2
+          type: maxpooling2d
+        - activation: relu
+          filters: 64
+          kernel_size:
+            - 3
+            - 3
+          type: conv2d
+        - type: flatten
+        - activation: relu
+          type: dense
+          units: 64
+        - activation: softmax
+          type: dense
+          units: 10
+learning_rate:
+    value: 0.001
+loss:
+    value: categorical_crossentropy
+metrics:
+    value:
+        - accuracy
+mnist:
+    value:
+        augmentations:
+            - height: 32
+              name: scale
+              width: 32
+            - name: to_color
+        batch_size: 32
+        buffer_size: 1000
+        dataset_name: mnist
+        filtering: null
+        normalisation_method: div255
+        prefetch: true
+        shuffle: false
+        splits:
+            - train
+            - test
+        train_split: 0.5
+        y_mapping_type:
+            - onehot
+model_name:
+    value: simple_cnn
+optimizer:
+    value: sgd
+train_test:
+    value:
+        augmentations: null
+        batch_size: 32
+        buffer_size: 1000
+        dataset_name: cifar10
+        filtering: null
+        normalisation_method: div255
+        prefetch: true
+        shuffle: true
+        splits:
+            - train
+            - test
+        train_split: 0.8
+        y_mapping_type:
+            - onehot

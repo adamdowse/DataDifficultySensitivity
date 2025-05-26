@@ -1,0 +1,13 @@
+/usr/local/lib/python3.11/dist-packages/keras/src/layers/convolutional/base_conv.py:107: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.
+  super().__init__(activity_regularizer=activity_regularizer, **kwargs)
+Calculating FIM: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 10000/10000 [00:33<00:00, 299.69it/s]
+Calculating FIM: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 10000/10000 [00:32<00:00, 312.47it/s]
+Calculating FIM: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 10000/10000 [00:31<00:00, 318.51it/s]
+Calculating FIM: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 10000/10000 [00:31<00:00, 317.71it/s]
+Traceback (most recent call last):
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 192, in <module>
+    compare_alpha(data_config, model_config)
+  File "/com.docker.devenvironments.code/Alpha/AlphaDetect.py", line 83, in compare_alpha
+    img_ax[0, i].set_title("Train Img " + str(train_imgs[1][i][1]))
+                                              ~~~~~~~~~~~~~^^^
+IndexError: list index out of range

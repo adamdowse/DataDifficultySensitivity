@@ -1,0 +1,16 @@
+{"time":"2025-05-26T20:30:05.907630574Z","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/com.docker.devenvironments.code/Alpha/wandb/run-20250526_203005-7wkb8nb8/logs/debug-core.log"}
+{"time":"2025-05-26T20:30:06.182088622Z","level":"INFO","msg":"created new stream","id":"7wkb8nb8"}
+{"time":"2025-05-26T20:30:06.182141624Z","level":"INFO","msg":"stream: started","id":"7wkb8nb8"}
+{"time":"2025-05-26T20:30:06.182217027Z","level":"INFO","msg":"writer: Do: started","stream_id":"7wkb8nb8"}
+{"time":"2025-05-26T20:30:06.182256129Z","level":"INFO","msg":"handler: started","stream_id":"7wkb8nb8"}
+{"time":"2025-05-26T20:30:06.182302131Z","level":"INFO","msg":"sender: started","stream_id":"7wkb8nb8"}
+{"time":"2025-05-26T20:30:06.40189211Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-05-26T20:31:42.230790502Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-05-26T20:31:42.230905407Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-05-26T20:31:43.051727818Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-05-26T20:31:43.232106964Z","level":"INFO","msg":"handler: operation stats","stats":{"operations":[{"desc":"uploading summary, console lines 6-6","runtime_seconds":0.180249839}],"total_operations":1}}
+{"time":"2025-05-26T20:31:43.36654596Z","level":"INFO","msg":"stream: closing","id":"7wkb8nb8"}
+{"time":"2025-05-26T20:31:43.366600063Z","level":"INFO","msg":"handler: closed","stream_id":"7wkb8nb8"}
+{"time":"2025-05-26T20:31:43.366617863Z","level":"INFO","msg":"writer: Close: closed","stream_id":"7wkb8nb8"}
+{"time":"2025-05-26T20:31:43.366644365Z","level":"INFO","msg":"sender: closed","stream_id":"7wkb8nb8"}
+{"time":"2025-05-26T20:31:43.366684666Z","level":"INFO","msg":"stream: closed","id":"7wkb8nb8"}

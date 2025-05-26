@@ -1,0 +1,16 @@
+{"time":"2025-05-26T18:20:45.510503523Z","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/com.docker.devenvironments.code/Alpha/wandb/run-20250526_182045-asa39hoi/logs/debug-core.log"}
+{"time":"2025-05-26T18:20:45.843552308Z","level":"INFO","msg":"created new stream","id":"asa39hoi"}
+{"time":"2025-05-26T18:20:45.84360191Z","level":"INFO","msg":"stream: started","id":"asa39hoi"}
+{"time":"2025-05-26T18:20:45.843639112Z","level":"INFO","msg":"handler: started","stream_id":"asa39hoi"}
+{"time":"2025-05-26T18:20:45.843697415Z","level":"INFO","msg":"writer: Do: started","stream_id":"asa39hoi"}
+{"time":"2025-05-26T18:20:45.843724016Z","level":"INFO","msg":"sender: started","stream_id":"asa39hoi"}
+{"time":"2025-05-26T18:20:46.077000292Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-05-26T18:22:21.298220652Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-05-26T18:22:21.298362359Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-05-26T18:22:21.998696315Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-05-26T18:22:22.226127456Z","level":"INFO","msg":"handler: operation stats","stats":{}}
+{"time":"2025-05-26T18:22:22.22929282Z","level":"INFO","msg":"stream: closing","id":"asa39hoi"}
+{"time":"2025-05-26T18:22:22.229354723Z","level":"INFO","msg":"handler: closed","stream_id":"asa39hoi"}
+{"time":"2025-05-26T18:22:22.229369524Z","level":"INFO","msg":"writer: Close: closed","stream_id":"asa39hoi"}
+{"time":"2025-05-26T18:22:22.229392125Z","level":"INFO","msg":"sender: closed","stream_id":"asa39hoi"}
+{"time":"2025-05-26T18:22:22.229432927Z","level":"INFO","msg":"stream: closed","id":"asa39hoi"}
